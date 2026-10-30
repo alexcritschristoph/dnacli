@@ -194,7 +194,7 @@ func (m *model) View() string {
 func (m *model) drawHeader(g grid, l layout) {
 	head := cellStyle{fg: colorText, bg: colorPanel}
 	g.fill(0, 0, m.width, ' ', head)
-	badge := " dnacli " + version + " "
+	badge := " dnacli "
 	g.draw(0, 0, badge, cellStyle{fg: colorBackdrop, bg: colorAccent, bold: true})
 
 	c := m.contigs()[m.contig]

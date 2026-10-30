@@ -576,12 +576,16 @@ func TestEveryTestFileDraws(t *testing.T) {
 	}
 }
 
-func TestHeaderShowsTheVersion(t *testing.T) {
+// The header names the program, without a release number, at every width.
+func TestHeaderNamesTheProgram(t *testing.T) {
 	m := testModel(t, "viral_variants")
 	for _, width := range []int{40, 80, 150} {
 		lines := screen(t, m, width, 30)
-		if !strings.Contains(lines[0], "dnacli "+version) {
+		if !strings.Contains(lines[0], "dnacli") {
 			t.Fatalf("at %d columns the header says %q", width, lines[0])
+		}
+		if strings.Contains(lines[0], version) {
+			t.Fatalf("at %d columns the header shows the version: %q", width, lines[0])
 		}
 	}
 }
@@ -1489,23 +1493,23 @@ func TestChoosingACommandListsWhatItTakes(t *testing.T) {
 }
 
 // TestUsageListsOnlyFileArguments pins the command line text: files of each
-// kind, in the order they were written, and --version as the only option.
+// kind, in the order they were written, and no options at all.
 func TestUsageListsOnlyFileArguments(t *testing.T) {
 	for _, line := range []string{
 		"dnacli: a modern terminal read alignment viewer.",
+		"version " + version,
 		"  dnacli reads.bam [reference.gb|reference.fa]",
 		"  dnacli reads.bam [reference.gb|reference.fa] [variants.vcf]",
 		"  dnacli reads.bam [more.bam ...]",
 		"  dnacli sample_a.bam sample_b.bam genome.gbk snvs.vcf",
 		"  dnacli samples*.bam",
-		"dnacli --version prints which release this is.",
 		"Files are recognised by their extensions, and can be in any order.",
 	} {
 		if !strings.Contains(usage, line) {
 			t.Fatalf("the usage does not say %q", line)
 		}
 	}
-	if strings.Contains(usage, "Options:") || strings.Count(usage, "--") != 1 {
-		t.Fatalf("the usage lists more than --version:\n%s", usage)
+	if strings.Contains(usage, "Options:") || strings.Contains(usage, "--") {
+		t.Fatalf("the usage lists more than the files:\n%s", usage)
 	}
 }

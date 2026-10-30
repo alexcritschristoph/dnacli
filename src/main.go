@@ -12,7 +12,8 @@ import (
 // version is what ./build.sh stamps in, so a download can say which release it is.
 var version = "0.9.0"
 
-const usage = `dnacli: a modern terminal read alignment viewer.
+var usage = `dnacli: a modern terminal read alignment viewer.
+version ` + version + `
 
 Usage:
   dnacli reads.bam [reference.gb|reference.fa]
@@ -28,8 +29,6 @@ Examples:
   dnacli samples*.bam
 
 Files are recognised by their extensions, and can be in any order.
-
-dnacli --version prints which release this is.
 `
 
 type inputs struct {
