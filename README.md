@@ -42,7 +42,8 @@ make it executable, and run:
 
 You can open up several BAMs of samples mapped to the same reference at once. You can then navigate to a given position, and then quickly view that position across each BAM:
 
-<img width="2360" height="1240" alt="contigs" src="https://github.com/user-attachments/assets/4007f633-34be-4a5c-8b25-e1a76f6775a2" />
+<img width="2360" height="1240" alt="compare-samples" src="https://github.com/user-attachments/assets/c2b54cf0-2893-4f2c-a8ef-05e352489ef9" />
+
 
 #### 2. Investigate sites in a VCF
 
@@ -54,7 +55,7 @@ You can include a vcf file with SNPs of interest. The VCF is shown in a table vi
 
 For multi-contig references, you can see the coverage visualized per contig and instantly switch between them:
 
-<img width="2360" height="1240" alt="compare-samples" src="https://github.com/user-attachments/assets/c2b54cf0-2893-4f2c-a8ef-05e352489ef9" />
+<img width="2360" height="1240" alt="contigs" src="https://github.com/user-attachments/assets/4007f633-34be-4a5c-8b25-e1a76f6775a2" />
 
 ####  Filter reads, copy reads, view mutational effects
 
