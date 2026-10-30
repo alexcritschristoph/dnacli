@@ -1,7 +1,7 @@
 # dnacli
 A modern BAM/SAM terminal viewer.
 
-`dnacli` is an interactive read mapping alignment viewer entirely within the terminal. 
+`dnacli` is an interactive read mapping alignment viewer for the terminal. 
 
 <img width="2360" height="1240" alt="ecoli-genes" src="https://github.com/user-attachments/assets/6ff11889-13b0-49b9-8a5a-30102642f62a" />
 
@@ -13,9 +13,6 @@ Use dnacli to open and inspect BAM or SAM files. Run it like this:
 `dnacli reads.bam [more.bam ...] [reference.gb|reference.fa] [variants.vcf]`
 
 for example: `dnacli reads.bam reference.gb`
-
-Press `?` in the program for the keys, and `q` to quit.
-
 
 ---
 
@@ -38,22 +35,12 @@ unpack it, and run the binary inside:
 | Mac, Apple silicon | [dnacli-darwin-arm64.tar.gz](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-darwin-arm64.tar.gz) |
 | Mac, Intel | [dnacli-darwin-amd64.tar.gz](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-darwin-amd64.tar.gz) |
 
-Each download unpacks to a folder holding one binary, already named `dnacli`
-and already executable, so there is nothing to rename or move:
-
 ```
 tar xzf ~/Downloads/dnacli-linux-amd64.tar.gz
 ~/Downloads/dnacli-linux-amd64/dnacli reads.bam reference.gb
 ```
 
-On a Mac, double-clicking the download unpacks it in the Finder just the same.
-`uname -sm` says which one you need: `Linux x86_64`, `Darwin arm64`, and so on.
-
-A file fetched in a browser is quarantined by macOS the first time it runs;
-open it once with a right click → Open, or use the installer above, which does
-not leave that mark. `DNACLI_BIN_DIR=/usr/local/bin` installs somewhere other
-than `~/.local/bin`, `DNACLI_VERSION=v0.9.0` picks a release instead of the
-latest, and `dnacli --version` says which one you are running.
+Note: A file fetched in a browser is quarantined by macOS the first time it runs, so open it once with a right click Open, or use the installer above.
 
 
 ### Features
@@ -99,27 +86,7 @@ cd dnacli
 go build -o dnacli ./src
 ```
 
-Use Go 1.25 or newer. `./build.sh` builds all four downloads into `dist/`, the
-same way a release does.
-
-### Tests
-
-```
-go test ./...
-```
-
-The datasets under `src/testdata/` are 429 MB, so they are not in this repository:
-a clone without them skips the suite (`go test -v ./...` says why) instead of
-failing on files it has no way to read.
-
-### Benchmarks
-
-```
-./bench.sh
-```
-
-One user action per benchmark, logged in `benchmarks/`, which is not committed.
-It reads the fixtures in `src/testdata/` too, so it needs a checkout that has them.
+Use Go 1.25 or newer.
 
 ### Notes 
 
