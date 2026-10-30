@@ -3,33 +3,82 @@ A modern BAM/SAM terminal viewer.
 
 `dnacli` is an interactive read mapping alignment viewer entirely within the terminal. 
 
-It is inspired by `samtools tview`, but has many improvements and quality of life features: full pan and zoom; can open multiple bams for comparison; visualizes reads on genes and amino acid translations; highlights mutations and their effects; quickly jumps to mutations in a vcf; switching between contigs, and more.
-
-Use dnacli to open and inspect BAM or SAM files. Run it like this: `dnacli reads.bam [more.bam ...] [reference.gb|reference.fa] [variants.vcf]`, e.g. `dnacli reads.bam reference.gb`.
 <img width="2360" height="1240" alt="ecoli-genes" src="https://github.com/user-attachments/assets/6ff11889-13b0-49b9-8a5a-30102642f62a" />
+
+
+`dnacli` is inspired by `samtools tview`, but has many improvements and quality of life features: full pan and zoom; can open multiple bams for comparison; visualizes reads on genes and amino acid translations; highlights mutations and their effects; quickly jumps to mutations in a vcf; switching between contigs, and more.
+
+Use dnacli to open and inspect BAM or SAM files. Run it like this: 
+
+`dnacli reads.bam [more.bam ...] [reference.gb|reference.fa] [variants.vcf]`
+
+for example: `dnacli reads.bam reference.gb`
 
 
 ---
 
 ### Installation
 
+Instant install:
+```
+curl -fsSL https://raw.githubusercontent.com/alexcritschristoph/dnacli/main/install.sh | sh
+```
+
+Or pick the file for your computer from the
+[latest release](https://github.com/alexcritschristoph/dnacli/releases/latest),
+make it executable, and run:
+
+| System | Executable |
+| --- | --- |
+| Linux, Intel or AMD | [dnacli-linux-amd64](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-linux-amd64) |
+| Linux, ARM | [dnacli-linux-arm64](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-linux-arm64) |
+| Mac, Apple silicon | [dnacli-darwin-arm64](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-darwin-arm64) |
+| Mac, Intel | [dnacli-darwin-amd64](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-darwin-amd64) |
+
+
 ### Features
 
-1. Compare multiple samples
+#### 1. Compare multiple samples
+
+You can open up several BAMs of samples mapped to the same reference at once. You can then navigate to a given position, and then quickly view that position across each BAM:
+
 <img width="2360" height="1240" alt="contigs" src="https://github.com/user-attachments/assets/4007f633-34be-4a5c-8b25-e1a76f6775a2" />
 
-2. Investigate sites in a VCF
+#### 2. Investigate sites in a VCF
+
+You can include a vcf file with SNPs of interest. The VCF is shown in a table view, and you can select variants to instantly jump to their pileups for inspection:
+
 <img width="2360" height="1240" alt="vcholerae-variants" src="https://github.com/user-attachments/assets/db37d39c-d858-4953-8aba-4f9d0a80d247" />
 
-4. Browse by contig
+#### 3. Browse by contig
+
+For multi-contig references, you can see the coverage visualized per contig and instantly switch between them:
+
 <img width="2360" height="1240" alt="compare-samples" src="https://github.com/user-attachments/assets/c2b54cf0-2893-4f2c-a8ef-05e352489ef9" />
 
-5. Filter reads, copy reads, view mutational effects
+####  Filter reads, copy reads, view mutational effects
+
+You can filter the reads in the view by many metrics: mismatches, mapq, phred, length. You can copy the sequence of any read to clipboard. 
+
+Alleles at >5% frequency (>=3x reads) are flagged, and if they occur in protein coding genes the codon and AA changes are shown:
+
 <img width="2360" height="1240" alt="filters" src="https://github.com/user-attachments/assets/bddaa98b-2f3b-4955-b549-8800e506fdd8" />
 
-6. Export the view to a  SVG
+####  Export the view to a  SVG
+
 You can export any dnacli view as a beautiful SVG screenshot:
+
 <img width="1584" height="424" alt="test6" src="https://github.com/user-attachments/assets/5828fabb-a882-4665-b513-752ab2ac550f" />
+
+### Building from source
+
+```
+    git clone https://github.com/alexcritschristoph/dnacli
+    cd dnacli
+    go build -o dnacli .
+```
+
+Use Go 1.25 or newer.
 
 ### Notes 
 
