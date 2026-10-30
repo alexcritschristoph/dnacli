@@ -125,9 +125,12 @@ It reads the fixtures in `src/testdata/` too, so it needs a checkout that has th
 
 `dnacli` is primarily intended for use in microbial genomics (bacterial, viral, plasmids, synthetic biology). It is not especially designed for the human genome, and I have not tested it with the human genome.
 
+This program was made with agentic programming, with ample human planning and guidance. I apologize if you run into any bugs or issues that may result from that.
+
 ### Contributing
 
-If you're interested in contributing to dnacli, submit a pull request.
+If you're interested in contributing to dnacli, submit a pull request. I want to maintain the program's performance so I will extensively test any PR's impact on performance.
+
 
 ### License
 
