@@ -1,0 +1,13 @@
+# Built binaries and the release output
+/dnacli
+/dist/
+*.test
+
+# Exports written while looking at alignments
+/dnacli-*.svg
+
+# Kept locally to work with, never published
+/testdata/
+/docs/
+/benchmarks/
+/.tools/

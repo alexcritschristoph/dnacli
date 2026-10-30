@@ -14,26 +14,46 @@ Use dnacli to open and inspect BAM or SAM files. Run it like this:
 
 for example: `dnacli reads.bam reference.gb`
 
+Press `?` in the program for the keys, and `q` to quit.
+
 
 ---
 
 ### Installation
 
-Instant install:
+Instant install into `~/.local/bin`:
+
 ```
 curl -fsSL https://raw.githubusercontent.com/alexcritschristoph/dnacli/main/install.sh | sh
 ```
 
-Or pick the file for your computer from the
+Or download the folder for your computer from the
 [latest release](https://github.com/alexcritschristoph/dnacli/releases/latest),
-make it executable, and run:
+unpack it, and run the binary inside:
 
-| System | Executable |
+| System | Download |
 | --- | --- |
-| Linux, Intel or AMD | [dnacli-linux-amd64](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-linux-amd64) |
-| Linux, ARM | [dnacli-linux-arm64](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-linux-arm64) |
-| Mac, Apple silicon | [dnacli-darwin-arm64](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-darwin-arm64) |
-| Mac, Intel | [dnacli-darwin-amd64](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-darwin-amd64) |
+| Linux, Intel or AMD | [dnacli-linux-amd64.tar.gz](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-linux-amd64.tar.gz) |
+| Linux, ARM | [dnacli-linux-arm64.tar.gz](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-linux-arm64.tar.gz) |
+| Mac, Apple silicon | [dnacli-darwin-arm64.tar.gz](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-darwin-arm64.tar.gz) |
+| Mac, Intel | [dnacli-darwin-amd64.tar.gz](https://github.com/alexcritschristoph/dnacli/releases/latest/download/dnacli-darwin-amd64.tar.gz) |
+
+Each download unpacks to a folder holding one binary, already named `dnacli`
+and already executable, so there is nothing to rename or move:
+
+```
+tar xzf ~/Downloads/dnacli-linux-amd64.tar.gz
+~/Downloads/dnacli-linux-amd64/dnacli reads.bam reference.gb
+```
+
+On a Mac, double-clicking the download unpacks it in the Finder just the same.
+`uname -sm` says which one you need: `Linux x86_64`, `Darwin arm64`, and so on.
+
+A file fetched in a browser is quarantined by macOS the first time it runs;
+open it once with a right click → Open, or use the installer above, which does
+not leave that mark. `DNACLI_BIN_DIR=/usr/local/bin` installs somewhere other
+than `~/.local/bin`, `DNACLI_VERSION=v0.9.0` picks a release instead of the
+latest, and `dnacli --version` says which one you are running.
 
 
 ### Features
@@ -74,12 +94,32 @@ You can export any dnacli view as a beautiful SVG screenshot:
 ### Building from source
 
 ```
-    git clone https://github.com/alexcritschristoph/dnacli
-    cd dnacli
-    go build -o dnacli .
+git clone https://github.com/alexcritschristoph/dnacli
+cd dnacli
+go build -o dnacli ./src
 ```
 
-Use Go 1.25 or newer.
+Use Go 1.25 or newer. `./build.sh` builds all four downloads into `dist/`, the
+same way a release does.
+
+### Tests
+
+```
+go test ./...
+```
+
+The datasets under `src/testdata/` are 429 MB, so they are not in this repository:
+a clone without them skips the suite (`go test -v ./...` says why) instead of
+failing on files it has no way to read.
+
+### Benchmarks
+
+```
+./bench.sh
+```
+
+One user action per benchmark, logged in `benchmarks/`, which is not committed.
+It reads the fixtures in `src/testdata/` too, so it needs a checkout that has them.
 
 ### Notes 
 
@@ -88,3 +128,11 @@ Use Go 1.25 or newer.
 ### Contributing
 
 If you're interested in contributing to dnacli, submit a pull request.
+
+### License
+
+Copyright (C) 2026 Alex Crits-Christoph.
+
+dnacli is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, version 3. It comes with no warranty. See [LICENSE](LICENSE).
