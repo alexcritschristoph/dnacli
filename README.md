@@ -3,7 +3,7 @@ A modern BAM/SAM terminal viewer.
 
 `dnacli` is an interactive read mapping alignment viewer for the terminal. 
 
-<img width="2360" height="1240" alt="ecoli-genes" src="https://github.com/user-attachments/assets/6ff11889-13b0-49b9-8a5a-30102642f62a" />
+<img width="1770" height="930" alt="ecoli-genes-three-quarters" src="https://github.com/user-attachments/assets/b50487c5-2c4d-45f8-b049-2ab09e41b9f4" />
 
 
 `dnacli` is inspired by `samtools tview`, but has many improvements and quality of life features: full pan and zoom; can open multiple bams for comparison; visualizes reads on genes and amino acid translations; highlights mutations and their effects; quickly jumps to mutations in a vcf; switching between contigs, and more.
@@ -49,30 +49,23 @@ Note: A file fetched in a browser is quarantined by macOS the first time it runs
 
 You can open up several BAMs of samples mapped to the same reference at once. You can then navigate to a given position, and then quickly view that position across each BAM:
 
-<img width="2360" height="1240" alt="compare-samples" src="https://github.com/user-attachments/assets/c2b54cf0-2893-4f2c-a8ef-05e352489ef9" />
+<img width="1180" height="620" alt="compare-samples-half" src="https://github.com/user-attachments/assets/4c0e3a81-ada8-4756-8361-71f5e13b170a" />
 
-
-#### 2. Investigate sites in a VCF
+#### 2. Browse sites in a VCF
 
 You can include a vcf file with SNPs of interest. The VCF is shown in a table view, and you can select variants to instantly jump to their pileups for inspection:
 
-<img width="2360" height="1240" alt="vcholerae-variants" src="https://github.com/user-attachments/assets/db37d39c-d858-4953-8aba-4f9d0a80d247" />
+<img width="1180" height="620" alt="vcholerae-variants-half" src="https://github.com/user-attachments/assets/99987a81-183d-47c5-a28c-f7c98b0c705f" />
 
-#### 3. Browse by contig
-
-For multi-contig references, you can see the coverage visualized per contig and instantly switch between them:
-
-<img width="2360" height="1240" alt="contigs" src="https://github.com/user-attachments/assets/4007f633-34be-4a5c-8b25-e1a76f6775a2" />
-
-####  Filter reads, copy reads, view mutational effects
+#### 3. Filter reads, copy reads, view mutational effects
 
 You can filter the reads in the view by many metrics: mismatches, mapq, phred, length. You can copy the sequence of any read to clipboard. 
 
 Alleles at >5% frequency (>=3x reads) are flagged, and if they occur in protein coding genes the codon and AA changes are shown:
 
-<img width="2360" height="1240" alt="filters" src="https://github.com/user-attachments/assets/bddaa98b-2f3b-4955-b549-8800e506fdd8" />
+<img width="1770" height="930" alt="filters-three-quarters" src="https://github.com/user-attachments/assets/bca307f6-7f0d-4d3d-a29e-9978b654c607" />
 
-####  Export the view to a  SVG
+#### 4. Export the view to a  SVG
 
 You can export any dnacli view as a beautiful SVG screenshot:
 
