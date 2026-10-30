@@ -49,11 +49,13 @@ Note: A file fetched in a browser is quarantined by macOS the first time it runs
 
 You can open up several BAMs of samples mapped to the same reference at once. You can then navigate to a given position, and then quickly view that position across each BAM:
 
+<img width="1180" height="620" alt="compare-samples-half" src="https://alexcritschristoph.github.io/dnacli/compare-samples-half.gif" />
 
 #### 2. Browse sites in a VCF
 
 You can include a vcf file with SNPs of interest. The VCF is shown in a table view, and you can select variants to instantly jump to their pileups for inspection:
 
+<img width="1180" height="620" alt="vcholerae-variants-half" src="https://alexcritschristoph.github.io/dnacli/vcholerae-variants-half.gif" />
 
 #### 3. Filter reads, copy reads, view mutational effects
 
@@ -61,6 +63,7 @@ You can filter the reads in the view by many metrics: mismatches, mapq, phred, l
 
 Alleles at >5% frequency (>=3x reads) are flagged, and if they occur in protein coding genes the codon and AA changes are shown:
 
+<img width="1770" height="930" alt="filters-three-quarters" src="https://alexcritschristoph.github.io/dnacli/filters-three-quarters.gif" />
 
 #### 4. Export the view to a  SVG
 
