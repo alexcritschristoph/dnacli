@@ -40,6 +40,25 @@ tar xzf ~/Downloads/dnacli-linux-amd64.tar.gz
 
 Note: A file fetched in a browser is quarantined by macOS the first time it runs, so open it once with a right click Open, or use the installer above.
 
+### Examples
+
+View a BAM:
+
+```
+dnacli mapping.bam
+```
+
+View many BAMs (with the same reference) at once:
+
+```
+dnacli ./genomes/*.bam
+```
+
+View a BAM with a GenBank and/or a VCF:
+
+```
+dnacli mapping.bam genome.gb variants.vcf
+```
 
 ### Features
 
