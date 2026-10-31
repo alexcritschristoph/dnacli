@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -160,12 +161,16 @@ func TestLongReadZoomingStaysFast(t *testing.T) {
 	}
 	defer src.Close()
 	m := newModel(src, nil, "", nil)
-	m.width, m.height = 150, 44
+	m.panel, m.width, m.height = "", 150, 44
 	for ci := range src.Contigs {
+		if src.Contigs[ci].Length == 0 {
+			continue
+		}
 		m.contig, m.contigIndex = ci, ci
-		m.view = viewState{0, 1}
+		m.view = viewState{max(0, src.Contigs[ci].Length/2-75), 1}
 		m.reload()
 		fit, worst := m.fitZoom(), time.Duration(0)
+		sawReads := false
 		for m.view.bpp < fit {
 			before := m.view.bpp
 			start := time.Now()
@@ -173,8 +178,14 @@ func TestLongReadZoomingStaysFast(t *testing.T) {
 			m.View()
 			took := time.Since(start)
 			worst = max(worst, took)
+			if len(m.reads) > 0 {
+				sawReads = true
+			}
 			t.Logf("%s %6d -> %6d bases per column: %v, %d reads",
 				src.Contigs[ci].Name, before, m.view.bpp, took.Round(time.Microsecond), len(m.reads))
+		}
+		if !sawReads {
+			t.Errorf("%s never showed a read while zooming", src.Contigs[ci].Name)
 		}
 		if worst > 100*time.Millisecond {
 			t.Errorf("%s took %v for one zoom step", src.Contigs[ci].Name, worst)
@@ -188,57 +199,143 @@ func TestLongReadZoomingStaysFast(t *testing.T) {
 	}
 }
 
-// The benchmarks below time the two things a keystroke costs: loading the
-// region behind the screen, and drawing it. Each case is a shape of work the
-// screen meets: long reads, a dense pileup, and a big short-read genome.
-var screenCases = []struct {
+// screenCase is one shape of work the screen meets: long reads, a dense
+// pileup, or a big short-read genome.
+type screenCase struct {
 	name, align, ref string
-	plasmid, bpp     int
-}{
-	{"long-read plasmid", "testdata/bf_fragilis.bam", "testdata/bf_fragilis.gb", 1, 200},
-	{"ONT 203x", "testdata/hiv1.bam", "testdata/hiv1.gb", 0, 50},
-	{"dense 300x", "testdata/influenza_h1n1.bam", "", 0, 20},
-	{"genome 40x", "testdata/ecoli_k12.bam", "testdata/ecoli_k12.gb", 0, 50},
+	contig           string // "" opens the contig newModel picks
+	bpp              int
+	middle           bool // start at the middle of the contig, where reads are dense
+	long             bool // whether this is one of the ultra-long-read screens
 }
 
-func screenModel(b *testing.B, c struct {
-	name, align, ref string
-	plasmid, bpp     int
-}) *model {
+var screenCases = []screenCase{
+	{"long-read plasmid", "testdata/bf_fragilis.bam", "testdata/bf_fragilis.gb", "NC_006873.1", 200, false, true},
+	{"long-read chromosome", "testdata/bf_fragilis.bam", "testdata/bf_fragilis.fa", "NC_003228.3", 150, true, true},
+	{"short-read control", "testdata/bf_fragilis_short_20x.bam", "testdata/bf_fragilis.fa", "NC_003228.3", 150, true, false},
+	{"ONT 203x", "testdata/hiv1.bam", "testdata/hiv1.gb", "", 50, false, false},
+	{"dense 300x", "testdata/influenza_h1n1.bam", "", "", 20, false, false},
+	{"genome 40x", "testdata/ecoli_k12.bam", "testdata/ecoli_k12.gb", "", 50, false, false},
+}
+
+// screenModel prepares one case the way opening the file does: the panel is
+// closed, the named contig is chosen, and a base-level screen is loaded so the
+// model learns the file's read length before it is asked for a wide view.
+func screenModel(tb testing.TB, c screenCase) *model {
+	tb.Helper()
 	src, err := OpenAlignments(c.align)
 	if err != nil {
-		b.Skip(err)
+		tb.Skip(err)
 	}
-	b.Cleanup(src.Close)
+	tb.Cleanup(src.Close)
 	var ref *Reference
 	if c.ref != "" {
 		if ref, err = LoadReference(c.ref); err != nil {
-			b.Fatal(err)
+			tb.Fatal(err)
 		}
 		ref.MatchContigs(src.Contigs)
 	}
 	m := newModel(src, ref, c.ref, nil)
+	m.panel, m.panelFocus = "", false
 	m.width, m.height = 150, 44
-	if c.plasmid == 1 {
-		for i, cg := range src.Contigs {
-			if cg.Length < 100000 {
-				m.contig, m.contigIndex = i, i
+	if c.contig != "" {
+		found := false
+		for i, contig := range src.Contigs {
+			if contig.Name == c.contig {
+				m.contig, m.contigIndex, found = i, i, true
+				break
 			}
 		}
+		if !found {
+			tb.Fatalf("%s has no contig %s", c.align, c.contig)
+		}
 	}
-	m.view = viewState{0, c.bpp}
+	contig := m.contigs()[m.contig]
+	if contig.Length == 0 {
+		tb.Fatalf("%s chose the empty contig %q", c.name, contig.Name)
+	}
+	start := 0
+	if c.middle {
+		start = max(0, contig.Length/2-75*c.bpp)
+	}
+	m.view = viewState{start, 1}
+	m.reload() // learn the read length before asking for a view that may hide reads
+	m.held = window{}
+	m.view = viewState{start, c.bpp}
 	m.reload()
 	return m
 }
 
+// BenchmarkLoad is a cached reload: the region is already held and the view
+// moves only a few bases.
 func BenchmarkLoad(b *testing.B) {
 	for _, c := range screenCases {
 		b.Run(c.name, func(b *testing.B) {
 			m := screenModel(b, c)
+			start := m.view.start
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				m.view = viewState{i * 7, c.bpp}
+				m.view = viewState{start + i*7, c.bpp}
 				m.reload()
+			}
+		})
+	}
+}
+
+// BenchmarkColdLoad asks for a region the model has not held, the way a zoom
+// or a filter change does.
+func BenchmarkColdLoad(b *testing.B) {
+	for _, c := range screenCases {
+		b.Run(c.name, func(b *testing.B) {
+			m := screenModel(b, c)
+			start := m.view.start
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				m.view = viewState{start, c.bpp}
+				m.held = window{}
+				m.reload()
+			}
+		})
+	}
+}
+
+// TestScreenCasesShowReads guards the benchmark setup: every case must load
+// reads at its measured zoom, and the pileup must not be blank. It also records
+// one cold load and frame per case.
+func TestScreenCasesShowReads(t *testing.T) {
+	for _, c := range screenCases {
+		t.Run(c.name, func(t *testing.T) {
+			m := screenModel(t, c)
+			if !m.showReads() {
+				t.Fatalf("the view at %d bases per column does not show reads", c.bpp)
+			}
+			if len(m.reads) == 0 || m.rowCount == 0 {
+				t.Fatalf("the view holds %d reads in %d rows", len(m.reads), m.rowCount)
+			}
+			lines := screen(t, m, 150, 44)
+			l := m.layout()
+			seen := false
+			for row := l.pileupTop; row < l.pileupTop+l.pileupRows && row < len(lines); row++ {
+				if strings.ContainsAny(lines[row], "ACGT▶◀━") {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				t.Fatal("the pileup area is blank")
+			}
+			m.view = viewState{m.view.start, c.bpp}
+			m.held = window{}
+			begin := time.Now()
+			m.reload()
+			loaded := time.Since(begin)
+			begin = time.Now()
+			m.View()
+			drawn := time.Since(begin)
+			t.Logf("%d reads, %d rows, learned read length %d, cold load %v, draw %v",
+				len(m.reads), m.rowCount, m.readLength, loaded.Round(time.Microsecond), drawn.Round(time.Microsecond))
+			if loaded+drawn > 300*time.Millisecond {
+				t.Errorf("one cold screen took %v", loaded+drawn)
 			}
 		})
 	}
@@ -250,6 +347,30 @@ func BenchmarkFrame(b *testing.B) {
 			m := screenModel(b, c)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
+				m.View()
+			}
+		})
+	}
+}
+
+// The two long-read screens use the real key step, with the frame that follows.
+func BenchmarkLongReadPan(b *testing.B)  { benchLongRead(b, "right", "left") }
+func BenchmarkLongReadZoom(b *testing.B) { benchLongRead(b, "+", "-") }
+
+func benchLongRead(b *testing.B, forward, back string) {
+	for _, c := range screenCases {
+		if !c.long {
+			continue
+		}
+		b.Run(c.name, func(b *testing.B) {
+			m := screenModel(b, c)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if i%2 == 0 {
+					press(m, forward)
+				} else {
+					press(m, back)
+				}
 				m.View()
 			}
 		})
