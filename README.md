@@ -94,8 +94,8 @@ If you're interested in contributing to dnacli, submit a pull request. I want to
 
 ### License
 
-Copyright (C) 2026 Alex Crits-Christoph.
-
 dnacli is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
 Foundation, version 3. It comes with no warranty. See [LICENSE](LICENSE).
+
+There is no citation for dnacli, but if you use it, please provide a link to this repository.
