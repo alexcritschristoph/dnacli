@@ -41,6 +41,10 @@ type model struct {
 	rowOffset     int
 	wheelTurned   time.Time // when the wheel last turned, which tells a mouse from a track pad
 	wheelActed    time.Time // when a turn of the wheel last did something
+	movePan       int       // bases the keys have asked for, not yet shown
+	moveZoom      int       // ladder steps the keys have asked for, not yet shown
+	moveAnchor    int       // the column a pending zoom holds still
+	moveScheduled bool      // a timer is booked to show the pending movement
 
 	reads      []*Alignment
 	cols       []columnSpec // what each screen column shows
@@ -203,6 +207,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = ""
 		}
 		return m, m.fade()
+	case moveMsg:
+		m.showMove()
+		return m, nil
 	}
 	return m, nil
 }
@@ -228,9 +235,9 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "?":
 		m.togglePanel("help")
 	case "left":
-		m.moveSideways(-1, -step)
+		return m.moveSideways(-1, -step)
 	case "right":
-		m.moveSideways(1, step)
+		return m.moveSideways(1, step)
 	case "up":
 		m.moveUpDown(-1)
 	case "down":
@@ -244,9 +251,9 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "end":
 		m.goTo(m.contigs()[m.contig].Length)
 	case "+", "=":
-		m.zoom(-1, m.layout().columns/2)
+		return m.zoomLater(-1, m.layout().columns/2)
 	case "-", "_":
-		m.zoom(1, m.layout().columns/2)
+		return m.zoomLater(1, m.layout().columns/2)
 	case "0":
 		m.view.bpp = m.fitZoom()
 		m.goTo(m.contigs()[m.contig].Length / 2)
@@ -297,13 +304,13 @@ func (m *model) moveUpDown(delta int) {
 
 // moveSideways is the left and right keys: they change the chosen filter when
 // the filter panel has the focus, and pan otherwise.
-func (m *model) moveSideways(delta, bases int) {
+func (m *model) moveSideways(delta, bases int) tea.Cmd {
 	if m.panelFocus && m.panel == "filters" {
 		filterRows[m.filterIndex].move(&m.filter, delta)
 		m.reload()
-		return
+		return nil
 	}
-	m.pan(bases)
+	return m.panLater(bases)
 }
 
 // openPanel shows a panel and hands it the arrow keys.
@@ -365,6 +372,52 @@ func (m *model) span() int { return m.layout().columns * m.view.bpp }
 func (m *model) pan(bases int) {
 	m.view.start += bases
 	m.reload()
+}
+
+// A held arrow key sends a key every 20 to 30 ms, faster than a screen of reads
+// can be loaded. So a pan or a zoom only counts itself up, and a timer a moment
+// later shows what is pending in one go: the keys drain at once instead of the
+// view replaying them after the hand has stopped, and a pan that is followed by a
+// zoom or a pan the other way never happens at all.
+const movePause = 20 * time.Millisecond
+
+type moveMsg struct{}
+
+// panLater counts up a pan for the timer to show.
+func (m *model) panLater(bases int) tea.Cmd {
+	m.movePan += bases
+	m.moveZoom = 0 // the newest movement is the one that speaks
+	return m.scheduleMove()
+}
+
+// zoomLater counts up a zoom for the timer to show, holding still the base under
+// the anchor column.
+func (m *model) zoomLater(steps, anchor int) tea.Cmd {
+	m.moveZoom += steps
+	m.movePan = 0
+	m.moveAnchor = anchor
+	return m.scheduleMove()
+}
+
+// scheduleMove books the one timer that shows the pending movement.
+func (m *model) scheduleMove() tea.Cmd {
+	if m.moveScheduled {
+		return nil
+	}
+	m.moveScheduled = true
+	return tea.Tick(movePause, func(time.Time) tea.Msg { return moveMsg{} })
+}
+
+// showMove pans and zooms as far as the keys have asked since the last frame.
+func (m *model) showMove() {
+	pan, zoom, anchor := m.movePan, m.moveZoom, m.moveAnchor
+	m.movePan, m.moveZoom, m.moveScheduled = 0, 0, false
+	if pan != 0 {
+		m.pan(pan)
+	}
+	if zoom != 0 {
+		m.zoom(zoom, anchor)
+	}
 }
 
 // showRange frames a stretch of the reference, with a little room either side.
@@ -629,9 +682,9 @@ func (m *model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		case msg.Ctrl:
 			m.scroll(turn * 3)
 		case msg.Shift:
-			m.pan(turn * max(1, m.span()/8))
+			return m.panLater(turn * max(1, m.span()/8))
 		default:
-			m.zoom(turn, clamp(msg.X-gutterWidth, 0, l.columns-1))
+			return m.zoomLater(turn, clamp(msg.X-gutterWidth, 0, l.columns-1))
 		}
 		return nil
 	}
@@ -709,6 +762,7 @@ func (m *model) clickPanel(y int, l layout) {
 // loading ------------------------------------------------------------------
 
 func (m *model) reload() {
+	m.movePan, m.moveZoom, m.moveScheduled = 0, 0, false // whatever was pending is now out of date
 	l := m.layout()
 	contig := m.contigs()[m.contig]
 	m.view.bpp = clamp(m.view.bpp, 1, m.fitZoom())

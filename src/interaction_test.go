@@ -26,6 +26,7 @@ func press(m *model, key string) {
 		msg = tea.KeyMsg{Type: kind}
 	}
 	m.handleKey(msg)
+	m.showMove() // the timer that shows a pan or zoom is not waited for in tests
 }
 
 // run types a command into the bar and presses enter, the way a user would.
@@ -38,6 +39,7 @@ func run(m *model, text string) {
 
 func mouse(m *model, x, y int, action tea.MouseAction, button tea.MouseButton) {
 	m.handleMouse(tea.MouseMsg{X: x, Y: y, Action: action, Button: button})
+	m.showMove() // the timer that shows a pan or zoom is not waited for in tests
 }
 
 func ready(t *testing.T, stem string) *model {
@@ -96,6 +98,53 @@ func TestZoomStaysCentredAndStopsAtWholeContig(t *testing.T) {
 	}
 	if m.view.bpp != 1 {
 		t.Fatalf("zooming all the way in gave %d bases per column", m.view.bpp)
+	}
+}
+
+func TestABurstOfPanningLandsOnce(t *testing.T) {
+	m := ready(t, "viral_variants")
+	m.view.bpp = 10
+	m.reload()
+	start, step := m.view.start, max(1, m.span()*7/50)
+	begin := time.Now()
+	for i := 0; i < 40; i++ { // what a held arrow key sends while the last screen is still loading
+		m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	}
+	gathered := time.Since(begin)
+	if m.view.start != start {
+		t.Fatalf("the view moved with each key instead of waiting for the screen")
+	}
+	loaded := time.Now()
+	m.showMove()
+	load := time.Since(loaded)
+	if want := start + 40*step; m.view.start != want {
+		t.Fatalf("the burst landed at %d, want %d", m.view.start, want)
+	}
+	t.Logf("40 keys gathered in %s, then one screen loaded in %s", gathered.Round(time.Microsecond), load.Round(time.Microsecond))
+}
+
+func TestANewMovementDropsThePendingOne(t *testing.T) {
+	m := ready(t, "viral_variants")
+	m.view.bpp = 10
+	m.reload()
+	m.goTo(m.contigs()[m.contig].Length / 2)
+	start := m.view.start
+	anchor := m.layout().columns / 2
+	under := m.cols[anchor].pos
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft}) // back the other way cancels it
+	m.showMove()
+	if m.view.start != start {
+		t.Fatalf("panning back the other way moved to %d, want %d", m.view.start, start)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("-")}) // a zoom drops the pan
+	m.showMove()
+	if m.view.bpp != 20 {
+		t.Fatalf("the zoom left %d bases per column, want 20", m.view.bpp)
+	}
+	if got := m.cols[anchor].pos; got != under {
+		t.Fatalf("the zoom after a pan held base %d instead of %d", got, under)
 	}
 }
 
@@ -965,6 +1014,7 @@ func TestTheWheelZooms(t *testing.T) {
 	wheel := func(button tea.MouseButton, ctrl, shift bool) {
 		m.wheelTurned = time.Now().Add(-time.Second) // one click of a mouse wheel, long after the last
 		m.handleMouse(tea.MouseMsg{X: 40, Y: m.layout().pileupTop, Button: button, Ctrl: ctrl, Shift: shift})
+		m.showMove()
 	}
 	wheel(tea.MouseButtonWheelUp, false, false)
 	if m.view.bpp != 5 {
@@ -979,6 +1029,7 @@ func TestTheWheelZooms(t *testing.T) {
 	for i := 0; i < 2; i++ { // a fast hand on the wheel is not held back
 		m.wheelTurned = time.Now().Add(-2 * mouseClick)
 		m.handleMouse(tea.MouseMsg{X: 40, Y: m.layout().pileupTop, Button: tea.MouseButtonWheelDown})
+		m.showMove()
 	}
 	if m.view.bpp != 20 {
 		t.Fatalf("two quick clicks of the wheel left the zoom at %d bases per column, want 20", m.view.bpp)
@@ -990,6 +1041,7 @@ func TestTheWheelZooms(t *testing.T) {
 	for i := 0; i < 3; i++ { // zooming closes in on the pointer, not the middle
 		m.wheelTurned = time.Now().Add(-time.Second)
 		m.handleMouse(tea.MouseMsg{X: gutterWidth + 10, Y: m.layout().pileupTop, Button: tea.MouseButtonWheelUp})
+		m.showMove()
 	}
 	if under := m.cols[10].pos; under != m.view.start+10*m.view.bpp {
 		t.Fatalf("the base under the pointer moved to column %d", (under-m.view.start)/m.view.bpp)
