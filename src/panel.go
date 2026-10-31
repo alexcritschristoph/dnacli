@@ -254,6 +254,7 @@ var helpLines = [][2]string{
 	{"home  end", "jump to the ends of the contig"},
 	{"+ -  or the wheel", "zoom in and out"},
 	{"left click", "left clicking on a read copies it"},
+	{"a  or the arrow", "show every GenBank feature"},
 	{"0", "fit the whole contig on screen"},
 	{"esc", "dismiss an open menu or panel"},
 	{"m", "turn mouse on/off, makes text selectable"},

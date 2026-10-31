@@ -34,12 +34,11 @@ type Alignment struct {
 	// base of the read when the view is too wide to draw them.
 	MismatchBase  []byte
 	MismatchQual  []byte
-	ConsensusAt   []int  // where the read differs from the consensus, filled in when drawn
-	consensusDone bool   // whether ConsensusAt has been worked out yet
-	LeadClip      int    // soft-clipped bases drawn before the alignment starts
-	TailClip      int    // and after it ends
-	Cigar         string // written out only when the view is close enough to show bases
-	Row           int    // filled in by the pileup packer
+	ConsensusAt   []int // where the read differs from the consensus, filled in when drawn
+	consensusDone bool  // whether ConsensusAt has been worked out yet
+	LeadClip      int   // soft-clipped bases drawn before the alignment starts
+	TailClip      int   // and after it ends
+	Row           int   // filled in by the pileup packer
 }
 
 func (a *Alignment) Reverse() bool { return a.Flags&sam.Reverse != 0 }
@@ -301,14 +300,20 @@ func (s *Source) each(contig string, start, end int, visit func(*sam.Record) boo
 // it is false only the bases that differ from the reference are kept, which is
 // all a view too wide to draw single bases needs.
 func (s *Source) Reads(contig string, start, end int, filter Filter, ref *Reference, detail bool) ([]*Alignment, int, bool) {
-	if s.expected(contig, end-start) <= maxAlignments {
-		out, seen := s.readRegion(contig, start, end, maxAlignments, filter, ref, detail)
+	return s.readsUpTo(contig, start, end, maxAlignments, filter, ref, detail)
+}
+
+// readsUpTo is Reads with a smaller ceiling, so a narrow strip of a view gets
+// only the share of its reads that its width earns.
+func (s *Source) readsUpTo(contig string, start, end, limit int, filter Filter, ref *Reference, detail bool) ([]*Alignment, int, bool) {
+	if s.expected(contig, end-start) <= limit {
+		out, seen := s.readRegion(contig, start, end, limit, filter, ref, detail)
 		return out, seen, false
 	}
 	// Take an equal share from slices spread evenly across the region, in one
 	// pass: reading each slice on its own would decompress the blocks between
 	// them again and again.
-	width, per := max(1, (end-start)/sampleSlices), max(1, maxAlignments/sampleSlices)
+	width, per := max(1, (end-start)/sampleSlices), max(1, limit/sampleSlices)
 	taken := make([]int, sampleSlices)
 	var out []*Alignment
 	seen := 0
@@ -360,9 +365,6 @@ func expand(rec *sam.Record, ref *Reference, clips, detail bool) *Alignment {
 	a := &Alignment{
 		Name: rec.Name, Start: rec.Pos, End: rec.End(), MapQ: rec.MapQ, Flags: rec.Flags,
 		MateStart: rec.MatePos, InsertSize: rec.TempLen,
-	}
-	if detail {
-		a.Cigar = rec.Cigar.String() // only the read line and the test ask for it
 	}
 	if clips {
 		a.LeadClip, a.TailClip = softClip(rec.Cigar, 0), softClip(rec.Cigar, len(rec.Cigar)-1)

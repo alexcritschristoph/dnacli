@@ -6,8 +6,8 @@ import (
 )
 
 // TestOverlappingCodingSequences pins down what overlapping CDSs look like:
-// their bars go on separate rows, their proteins share one row and overwrite
-// each other, and an impact goes to the first CDS in start order.
+// their bars go on separate rows, their proteins share one row where the
+// longest wins each column, and an impact goes to the same longest CDS.
 func TestOverlappingCodingSequences(t *testing.T) {
 	model := ready(t, "overlapping")
 	model.view = viewState{0, 1}
@@ -51,15 +51,16 @@ func TestOverlappingCodingSequences(t *testing.T) {
 		t.Fatal("the reverse gene has no left-pointing arrow")
 	}
 
-	// One protein row: every feature is painted into it in start order, and the
-	// later ones clear and overwrite the columns of the earlier ones.
+	// One protein row: features are painted shortest first, so the longest CDS
+	// covering a column clears and overwrites it and wins there.
 	columns := model.layout().columns
 	proteinRow := rowWith(model, "protein")
 	if proteinRow < 0 {
 		t.Fatal("no protein row was drawn")
 	}
+	track := model.codingTrack(columns)
 	want := make(map[int]rune)
-	for _, f := range model.codingTrack(columns) {
+	for _, f := range track {
 		positions := codingPositions(f)
 		protein := model.ref.givenProtein(f, contig, positions)
 		for i := 0; i+2 < len(positions); i += 3 {
@@ -91,14 +92,15 @@ func TestOverlappingCodingSequences(t *testing.T) {
 		}
 	}
 
-	// The position belongs to two or three CDSs; the first in start order wins.
+	// The position belongs to two CDSs; the longer one owns it, and a tie keeps
+	// the one the file lists first.
 	cases := []struct {
 		pos  int
 		gene string
 	}{
 		{200, "alpha"}, // alpha alone
-		{350, "alpha"}, // alpha and beta
-		{550, "beta"},  // beta and gamma
+		{350, "beta"},  // alpha (300 bp) and beta (399 bp)
+		{550, "beta"},  // beta and gamma, both 399 bp
 		{800, "gamma"}, // gamma alone
 	}
 	for _, c := range cases {

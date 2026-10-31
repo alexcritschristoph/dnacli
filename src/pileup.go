@@ -112,7 +112,7 @@ var baseSlots = func() [256]int8 {
 
 const (
 	minVariantSupport = 3    // the second base must be seen three times
-	minVariantRatio   = 0.05 // and be this share of the reads at the site
+	minVariantRatio   = 0.10 // and be this share of the reads at the site
 )
 
 // baseCounts counts how many reads carried each base at every position in a
@@ -121,13 +121,19 @@ const (
 func baseCounts(reads []*Alignment, start, end int) ([][4]int, []int) {
 	counts := make([][4]int, end-start)
 	depth := make([]int, end-start)
+	countRange(counts, depth, start, reads, start, end)
+	return counts, depth
+}
+
+// countRange adds the reads' bases to the tallies for the columns from..to.
+func countRange(counts [][4]int, depth []int, start int, reads []*Alignment, from, to int) {
 	for _, a := range reads {
 		if a.Bases == nil {
 			continue // zoomed out, where no base is kept to count
 		}
 		bases := a.Bases
-		from, to := max(a.Start+a.LeadClip, start), min(a.End-a.TailClip, end)
-		for pos := from; pos < to; pos++ {
+		lo, hi := max(a.Start+a.LeadClip, from), min(a.End-a.TailClip, to)
+		for pos := lo; pos < hi; pos++ {
 			i := pos - start
 			depth[i]++
 			if b := baseSlots[bases[pos-a.Start]]; b >= 0 {
@@ -135,7 +141,6 @@ func baseCounts(reads []*Alignment, start, end int) ([][4]int, []int) {
 			}
 		}
 	}
-	return counts, depth
 }
 
 // consensusBase is the base most reads carry at one position, or 0 where there

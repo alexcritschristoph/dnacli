@@ -17,11 +17,12 @@ func TestVariantMarkers(t *testing.T) {
 		marked         bool
 		ratio          float64
 	}{
-		{40, 2, false, 0},    // two reads are not enough, however deep the site
-		{40, 3, true, 0.075}, // three reads of a deep site
-		{10, 3, true, 0.3},   // the 5% floor is passed
-		{4, 2, false, 0},     // half the reads, but only two of them
-		{3, 3, true, 1},      // every read differs
+		{40, 2, false, 0},   // two reads are not enough, however deep the site
+		{40, 3, false, 0},   // 7.5% of a deep site is below the floor
+		{30, 3, true, 0.1},  // exactly 10% is enough
+		{10, 3, true, 0.3},  // well above the floor
+		{4, 2, false, 0},    // half the reads, but only two of them
+		{3, 3, true, 1},     // every read differs
 	}
 	for _, c := range cases {
 		counts, depth := oneSite(c.depth, 'C', c.support)

@@ -112,6 +112,7 @@ func main() {
 		}
 	}
 	m.switchTab(0)
+	m.async = true // panned and zoomed screens are built off the drawing thread
 
 	if _, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion()).Run(); err != nil {
 		quit("%v", err)

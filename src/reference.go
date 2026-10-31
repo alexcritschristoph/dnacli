@@ -163,7 +163,7 @@ func readGenBank(f *os.File) (*Reference, error) {
 			}
 		}
 		feats = kept
-		sort.Slice(feats, func(i, j int) bool { return feats[i].Start() < feats[j].Start() })
+		sort.SliceStable(feats, func(i, j int) bool { return feats[i].Start() < feats[j].Start() })
 		assignTable(feats, seq)
 		for _, name := range names {
 			ref.Seq[name] = seq

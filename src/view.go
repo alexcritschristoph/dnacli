@@ -164,9 +164,25 @@ func (g grid) fill(row, from, to int, r rune, s cellStyle) {
 	}
 }
 
+// spinner is the little mark that turns while a screen is being built.
+var spinner = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+
 func (m *model) View() string {
 	if m.width < 40 || m.height < 18 {
 		return "Error: dnacli needs a larger window."
+	}
+	if m.loading && len(m.frame) > 0 {
+		// The frame still in the buffer is the last complete one, so the picture
+		// never goes blank while the next is built.
+		if len(m.frame[0]) != m.width {
+			return m.frame.String() // the window changed size mid-load
+		}
+		row := m.frame[0]
+		saved := row[m.width-1]
+		row[m.width-1] = cell{spinner[m.spin%len(spinner)], cellStyle{fg: colorText, bg: colorPanel}}
+		frame := m.frame.String()
+		row[m.width-1] = saved
+		return frame
 	}
 	m.refreshBars()
 	l := m.layout()
@@ -311,10 +327,18 @@ func (m *model) geneTrack(columns int) [][]geneBar {
 	contig := m.contigs()[m.contig].Name
 	end := m.view.start + columns*m.view.bpp
 	inView := m.ref.featuresIn(contig, m.view.start, end)
-	coding := map[string]bool{}
+	type geneSpan struct {
+		name    string
+		start   int
+		end     int
+		reverse bool
+	}
+	spans := map[geneSpan]bool{}    // every CDS, by name and span
+	translated := map[string]bool{} // CDS names that carry a translation
 	for _, f := range inView {
 		if f.Kind == "CDS" {
-			coding[f.Name] = true
+			spans[geneSpan{f.Name, f.Start(), f.End(), f.Reverse}] = true
+			translated[f.Name] = translated[f.Name] || f.Protein != ""
 		}
 	}
 	var rows [][]geneBar
@@ -322,11 +346,19 @@ func (m *model) geneTrack(columns int) [][]geneBar {
 		if f.End() <= m.view.start || f.Start() >= end {
 			continue
 		}
+		if !m.allFeatures && f.Kind != "gene" && f.Kind != "CDS" {
+			continue // peptides and other sub-features would only crowd the row
+		}
 		if f.End()-f.Start() < m.view.bpp { // thinner than a column, so not worth a mark
 			continue
 		}
-		if f.Kind == "gene" && coding[f.Name] {
-			continue // the CDS says the same thing
+		if f.Kind == "gene" {
+			if spans[geneSpan{f.Name, f.Start(), f.End(), f.Reverse}] {
+				continue // a CDS of the same name covers the same span
+			}
+			if f.Protein == "" && translated[f.Name] {
+				continue // the CDS carries the translation this gene lacks
+			}
 		}
 		bar := geneBar{f, max(m.column(f.Start()), 0), min(m.column(f.End()-1)+1, columns)}
 		if bar.to <= bar.from {
@@ -340,15 +372,32 @@ func (m *model) geneTrack(columns int) [][]geneBar {
 				break
 			}
 		}
-		if !placed && len(rows) < 3 {
+		if !placed && (m.allFeatures || len(rows) < 3) {
 			rows = append(rows, []geneBar{bar})
 		}
 	}
 	return rows
 }
 
+// hiddenFeatures reports whether the view holds annotations other than genes
+// and CDSs, which the collapsed gene row leaves out.
+func (m *model) hiddenFeatures(columns int) bool {
+	if m.ref == nil {
+		return false
+	}
+	contig := m.contigs()[m.contig].Name
+	end := m.view.start + columns*m.view.bpp
+	for _, f := range m.ref.featuresIn(contig, m.view.start, end) {
+		if f.Kind != "gene" && f.Kind != "CDS" && f.End()-f.Start() >= m.view.bpp {
+			return true
+		}
+	}
+	return false
+}
+
 // codingTrack returns the features in view whose protein is drawn: every CDS,
-// and any other feature that carries a translation of its own.
+// and any other feature that carries a translation of its own. Shorter features
+// come first, so the longest one draws last and owns every column it shares.
 func (m *model) codingTrack(columns int) []Feature {
 	if m.ref == nil {
 		return nil
@@ -361,6 +410,7 @@ func (m *model) codingTrack(columns int) []Feature {
 			out = append(out, f)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return codingLength(out[i]) < codingLength(out[j]) })
 	return out
 }
 
@@ -378,8 +428,21 @@ func (m *model) drawTracks(g grid, l layout) {
 	}
 	row++
 
-	for _, bars := range m.geneTrack(l.columns) {
-		g.draw(row, gutterWidth-2-len("genes"), "genes", label)
+	track := m.geneTrack(l.columns)
+	arrow := m.allFeatures || m.hiddenFeatures(l.columns)
+	labelStart := gutterWidth - 2 - len("genes")
+	if arrow {
+		labelStart-- // make room so the arrow ends where the other labels do
+	}
+	for i, bars := range track {
+		g.draw(row, labelStart, "genes", label)
+		if arrow && i == len(track)-1 {
+			mark := "▼"
+			if m.allFeatures {
+				mark = "▲"
+			}
+			g.draw(row, gutterWidth-3, mark, label)
+		}
 		for _, b := range bars {
 			style := cellStyle{fg: "#7dcfff", bg: colorBackdrop}
 			if b.feature.Kind != "CDS" {
@@ -405,7 +468,7 @@ func (m *model) drawTracks(g grid, l layout) {
 	g.fill(row, gutterWidth, gutterWidth+l.columns, ' ', back)
 	for pos, s := range m.sites {
 		if col := m.column(pos); col >= 0 && col < l.columns {
-			shade := colorMuted // 5% and up
+			shade := colorMuted // 10% and up
 			switch {
 			case s.Ratio >= 0.5:
 				shade = colorAlert
@@ -595,10 +658,32 @@ func (m *model) drawPileup(g grid, l layout) {
 	if !m.showReads() && m.contigs()[m.contig].Profile == nil {
 		g.draw(l.pileupTop+1, gutterWidth+2, "Measuring coverage across the contig…", cellStyle{fg: colorMuted, bg: colorBackdrop})
 	} else if !m.showReads() {
-		g.draw(l.pileupTop+1, gutterWidth+2, "Zoomed out: the depth track covers the whole contig.", cellStyle{fg: colorMuted, bg: colorBackdrop})
-		g.draw(l.pileupTop+2, gutterWidth+2, "Press + to zoom to reads.", cellStyle{fg: colorDim, bg: colorBackdrop})
+		// The sketch hangs from the top like a pileup turned upside down: each
+		// column reaches as far down as its depth, drawn in soft shades whose
+		// color brightens with coverage.
+		rows := max(1, l.pileupRows*3/4)
+		peak := max(m.covPeak, 1)
+		for col, n := range m.cov {
+			if col >= l.columns {
+				break
+			}
+			height := (n*rows*8 + peak/2) / peak // eighths of a row
+			style := cellStyle{fg: mix("#22303c", "#6b93ad", float64(n)/float64(peak)), bg: colorBackdrop}
+			for row := 0; row < rows && height > 0; row++ {
+				r := '▒'
+				if height <= 8 { // the last cell is denser, so the contour stays crisp
+					r = '▓'
+				}
+				if row == 0 {
+					r = '░'
+				}
+				g.set(l.pileupTop+row, gutterWidth+col, r, style)
+				height -= 8
+			}
+		}
+		g.draw(l.pileupTop+l.pileupRows-1, gutterWidth+2, "Scroll in or press + to zoom to reads", cellStyle{fg: colorDim, bg: colorBackdrop})
 	} else if len(m.reads) == 0 {
-		g.draw(l.pileupTop+1, gutterWidth+2, "No reads here that pass the filters.", cellStyle{fg: colorDim, bg: colorBackdrop})
+		g.draw(l.pileupTop+1, gutterWidth+2, "No reads passing the filters", cellStyle{fg: colorDim, bg: colorBackdrop})
 	}
 	if hidden := m.rowCount - m.rowOffset - l.pileupRows; hidden > 0 {
 		note := fmt.Sprintf(" %d more rows below ", hidden)

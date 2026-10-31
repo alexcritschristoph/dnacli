@@ -62,7 +62,7 @@ func TestExportDrawsTheSameFrameAsTheScreen(t *testing.T) {
 	if len(doc.Texts) == 0 {
 		t.Fatal("the picture has no text")
 	}
-	for _, r := range "▁▂▃▄▅▆▇█─━│·▪▼▶◀▸" {
+	for _, r := range "▁▂▃▄▅▆▇█─━│·▪▼▶◀▸░▒▓" {
 		if strings.ContainsRune(string(data), r) {
 			t.Fatalf("%q was left as a letter instead of a shape", r)
 		}

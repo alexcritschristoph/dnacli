@@ -148,6 +148,78 @@ func TestANewMovementDropsThePendingOne(t *testing.T) {
 	}
 }
 
+func TestAPanDoesNotWaitForTheFile(t *testing.T) {
+	m := ready(t, "viral_variants")
+	m.async = true
+	m.view = viewState{1000, 5}
+	m.reload()
+	m.View() // a complete frame to keep on screen
+	start := m.view.start
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	begin := time.Now()
+	cmd := m.showMove()
+	took := time.Since(begin)
+	if took > 5*time.Millisecond {
+		t.Fatalf("the key waited %v for the file", took)
+	}
+	if !m.loading || m.view.start != start {
+		t.Fatalf("loading %v, start %d", m.loading, m.view.start)
+	}
+	if frame := m.View(); !strings.ContainsRune(frame, spinner[m.spin]) {
+		t.Fatal("the frame on screen has no loading mark")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatalf("the load did not start: %T", cmd())
+	}
+	msg := batch[0]()
+	loaded, ok := msg.(loadedMsg)
+	if !ok {
+		t.Fatalf("the load returned %T", msg)
+	}
+	m.Update(loaded)
+	if m.loading {
+		t.Fatal("the screen is still loading after the load came back")
+	}
+	if m.view.start != start+m.span()*7/50 {
+		t.Fatalf("the pan landed at %d, want %d", m.view.start, start+m.span()*7/50)
+	}
+}
+
+func TestZoomingIsNotDroppedWhileScreensLoad(t *testing.T) {
+	m := ready(t, "viral_variants")
+	m.async = true
+	m.view = viewState{2000, 10}
+	m.reload()
+	m.View()
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("-")})
+	cmd := m.showMove()
+	if !m.loading || m.view.bpp != 10 {
+		t.Fatalf("loading %v, zoom %d while the screen is built", m.loading, m.view.bpp)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("-")}) // a second step while the first is loading
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("the first zoom did not start a screen")
+	}
+	_, cmd = m.Update(batch[0]())
+	if m.view.bpp != 20 {
+		t.Fatalf("the first zoom landed at %d bases per column, want 20", m.view.bpp)
+	}
+	if cmd == nil {
+		t.Fatal("the second zoom was dropped while the screen loaded")
+	}
+	_, cmd = m.Update(cmd())
+	batch, ok = cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("the second zoom did not start a screen")
+	}
+	m.Update(batch[0]())
+	if m.view.bpp != 50 {
+		t.Fatalf("the second zoom landed at %d bases per column, want 50", m.view.bpp)
+	}
+}
+
 func TestPairsShareARowAndHoverLightsBoth(t *testing.T) {
 	m := ready(t, "paired_reads")
 	m.view = viewState{0, 10} // wide enough for both mates to be on screen
@@ -826,8 +898,8 @@ func TestTheReadLineOnlyAppearsWhilePointingAtARead(t *testing.T) {
 		t.Fatal("pointing at a read did not open a strip for it")
 	}
 	line := strings.Join(m.readSummary(read), " ")
-	if !strings.Contains(line, "paired, pair distance: 960 bp") || strings.Contains(line, read.Cigar) {
-		t.Fatalf("the read line should carry the distance between the mates and no CIGAR: %s", line)
+	if !strings.Contains(line, "paired, pair distance: 960 bp") {
+		t.Fatalf("the read line should carry the distance between the mates: %s", line)
 	}
 	for _, a := range m.reads {
 		if !a.Paired() {
@@ -1470,6 +1542,7 @@ func TestSampledRegionsLoadEachReadOnce(t *testing.T) {
 	m.reload()
 	whole := len(m.reads)
 	m.src.Contigs[0].Reads = 1 << 30 // pretend the contig is enormous so the region is sampled
+	m.held = window{}                // ask the file again, as a jump would
 	m.reload()
 	seen := map[string]bool{}
 	for _, a := range m.reads {

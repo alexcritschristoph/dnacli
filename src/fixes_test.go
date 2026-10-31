@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // These tests pin the fixes made after the audit, so a later change that
@@ -283,5 +285,211 @@ func TestOnlyTheReadsOnScreenLookForConsensusDifferences(t *testing.T) {
 	}
 	if scrolled <= computed {
 		t.Fatalf("scrolling showed %d more rows but no more reads were compared (%d before, %d after)", 5, computed, scrolled)
+	}
+}
+
+func TestZoomedOutShowsAnUpsideDownCoverageHistogram(t *testing.T) {
+	m := auditOpen(t, "testdata/vcholerae.bam", "", "")
+	m.width, m.height = 150, 44
+	c := &m.src.Contigs[m.contig]
+	c.Profile = m.src.CoverageProfile(c.Name, profileBinsFor(c.Length))
+	m.view = viewState{0, 500}
+	m.reload()
+	if m.showReads() || m.covPeak == 0 {
+		t.Fatalf("the view did not zoom out to a coverage sketch")
+	}
+
+	start := time.Now()
+	frame := m.View()
+	took := time.Since(start)
+	t.Logf("upside-down coverage sketch: %d columns, peak depth %d, drawn in %s",
+		len(m.cov), m.covPeak, took.Round(time.Microsecond))
+	if took > 50*time.Millisecond {
+		t.Errorf("drawing the coverage sketch took %v", took)
+	}
+	if !strings.Contains(frame, "Scroll in or press + to zoom to reads") {
+		t.Fatal("the zoomed-out view does not say how to reach the reads")
+	}
+	if strings.Contains(frame, "Zoomed out: the depth track covers the whole contig") {
+		t.Fatal("the old zoomed-out message is still shown")
+	}
+
+	l := m.layout()
+	rows := max(1, l.pileupRows*3/4)
+	for col := 0; col < l.columns && col < len(m.cov); col++ {
+		height := (m.cov[col]*rows*8 + m.covPeak/2) / m.covPeak
+		want := (height + 7) / 8
+		drawn := 0
+		for row := 0; row < l.pileupRows; row++ {
+			r := m.frame[l.pileupTop+row][gutterWidth+col].r
+			if strings.ContainsRune("░▒▓", r) {
+				drawn++
+				if row >= rows {
+					t.Fatalf("column %d draws below the 75%% limit at row %d", col, row)
+				}
+			}
+		}
+		if drawn != want {
+			t.Fatalf("column %d has depth %d and draws %d rows, want %d", col, m.cov[col], drawn, want)
+		}
+		if want > 0 {
+			if r := m.frame[l.pileupTop][gutterWidth+col].r; !strings.ContainsRune("░▒▓", r) {
+				t.Fatalf("column %d does not hang from the top of the read area", col)
+			}
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "sketch.svg")
+	if err := m.writeSVG(path, darkSVG); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "fill-opacity") {
+		t.Fatal("the exported sketch has no soft shades")
+	}
+	for _, r := range "░▒▓" {
+		if strings.ContainsRune(string(data), r) {
+			t.Fatalf("the export left %q as a letter instead of a shape", r)
+		}
+	}
+}
+
+func TestEmptyReadAreaSaysNoReadsPassingTheFilters(t *testing.T) {
+	m := ready(t, "viral_variants")
+	m.filter.MinMapQ = 1000
+	m.reload()
+	if len(m.reads) != 0 || !m.showReads() {
+		t.Fatalf("the impossible filter left %d reads", len(m.reads))
+	}
+	if frame := m.View(); !strings.Contains(frame, "No reads passing the filters") {
+		t.Fatal("an empty read area does not say that no reads pass the filters")
+	}
+}
+
+// The gene row shows whole genes and coding sequences only. The SARS-CoV-2
+// file also carries peptide and stem-loop features and the mitochondrial file
+// carries tRNAs; both used to crowd the row with bars bearing the gene's name.
+func TestGeneRowShowsOnlyGenesAndCDSs(t *testing.T) {
+	m := ready(t, "mito_human")
+	m.view = viewState{0, 1}
+	coding := false
+	for _, row := range m.geneTrack(m.contigs()[m.contig].Length) {
+		for _, bar := range row {
+			coding = coding || bar.feature.Kind == "CDS"
+			if bar.feature.Kind != "gene" && bar.feature.Kind != "CDS" {
+				t.Fatalf("the gene row shows a %s (%s)", bar.feature.Kind, geneName(bar.feature))
+			}
+		}
+	}
+	if !coding {
+		t.Fatal("the gene row shows no coding sequences")
+	}
+}
+
+// The longest coding sequence owns every column it shares with a shorter one,
+// whatever order the file lists them in.
+func TestLongestCDSIsDrawnLast(t *testing.T) {
+	m := ready(t, "overlapping")
+	contig := m.contigs()[m.contig].Name
+	m.ref.Features[contig] = []Feature{
+		{Kind: "CDS", Name: "long", Protein: strings.Repeat("W", 60), Ranges: []Range{{0, 180}}},
+		{Kind: "CDS", Name: "short", Protein: strings.Repeat("A", 30), Ranges: []Range{{0, 90}}},
+	}
+	m.ref.longest[contig] = 180
+	track := m.codingTrack(200)
+	if len(track) != 2 || track[0].Name != "short" || track[1].Name != "long" {
+		t.Fatalf("the protein row draws %v", track)
+	}
+}
+
+// A gene bar gives way to a CDS of the same name only when they cover the
+// same span, or when the gene has no translation and the CDS does.
+func TestGeneBarsGiveWayToMatchingCDSs(t *testing.T) {
+	m := ready(t, "overlapping")
+	contig := m.contigs()[m.contig].Name
+	m.ref.Features[contig] = []Feature{
+		{Kind: "gene", Name: "same", Ranges: []Range{{0, 30}}},
+		{Kind: "CDS", Name: "same", Protein: "MM", Ranges: []Range{{0, 30}}},
+		{Kind: "gene", Name: "borrowed", Ranges: []Range{{100, 130}}},
+		{Kind: "CDS", Name: "borrowed", Protein: "MM", Ranges: []Range{{110, 143}}},
+		{Kind: "gene", Name: "kept", Protein: "M", Ranges: []Range{{200, 230}}},
+		{Kind: "CDS", Name: "kept", Protein: "MM", Ranges: []Range{{210, 240}}},
+		{Kind: "gene", Name: "bare", Ranges: []Range{{300, 330}}},
+		{Kind: "CDS", Name: "bare", Ranges: []Range{{310, 340}}},
+	}
+	m.ref.longest[contig] = 143
+	bars := map[string]int{}
+	for _, row := range m.geneTrack(400) {
+		for _, bar := range row {
+			bars[bar.feature.Kind+" "+geneName(bar.feature)]++
+		}
+	}
+	want := map[string]int{
+		"CDS same":     1,
+		"CDS borrowed": 1,
+		"gene kept":    1, "CDS kept": 1,
+		"gene bare": 1, "CDS bare": 1,
+	}
+	if len(bars) != len(want) {
+		t.Fatalf("the gene row shows %v", bars)
+	}
+	for name, n := range want {
+		if bars[name] != n {
+			t.Fatalf("the gene row shows %v, want %v", bars, want)
+		}
+	}
+}
+
+// The arrow beside the gene row reveals every GenBank feature, and pressing a
+// does the same, so the row can be read without a mouse.
+func TestGeneArrowShowsEveryFeature(t *testing.T) {
+	m := ready(t, "sarscov2")
+	m.view = viewState{260, 1}
+	peptides := func() int {
+		n := 0
+		for _, row := range m.geneTrack(m.contigs()[m.contig].Length) {
+			for _, bar := range row {
+				if bar.feature.Kind == "mat_peptide" {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	lines := screen(t, m, 150, 44)
+	last := trackTop + len(m.geneTrack(m.layout().columns))
+	if !strings.Contains(lines[last], "genes▼") {
+		t.Fatalf("the lowest gene row says %q", lines[last])
+	}
+	if peptides() != 0 {
+		t.Fatal("peptides are shown before the arrow is clicked")
+	}
+	m.handleMouse(tea.MouseMsg{X: gutterWidth - 3, Y: last, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if peptides() == 0 {
+		t.Fatal("clicking the arrow showed no peptides")
+	}
+	lines = screen(t, m, 150, 44)
+	if !strings.Contains(lines[trackTop+len(m.geneTrack(m.layout().columns))], "genes▲") {
+		t.Fatalf("the expanded gene row says %q", lines[trackTop+len(m.geneTrack(m.layout().columns))])
+	}
+	press(m, "a")
+	if peptides() != 0 {
+		t.Fatal("pressing a did not hide the peptides again")
+	}
+}
+
+// A file whose annotations are all genes and CDSs hides nothing, so its gene
+// rows carry no arrow.
+func TestNoArrowWhenEveryFeatureIsShown(t *testing.T) {
+	m := ready(t, "overlapping")
+	m.view = viewState{100, 1}
+	lines := screen(t, m, 150, 44)
+	for row := trackTop + 1; row <= trackTop+len(m.geneTrack(m.layout().columns)); row++ {
+		if strings.ContainsAny(lines[row], "▼▲") {
+			t.Fatalf("the gene row shows an arrow although nothing is hidden: %q", lines[row])
+		}
 	}
 }

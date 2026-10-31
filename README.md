@@ -61,7 +61,7 @@ You can include a vcf file with SNPs of interest. The VCF is shown in a table vi
 
 You can filter the reads in the view by many metrics: mismatches, mapq, phred, length. You can copy the sequence of any read to clipboard. 
 
-Alleles at >5% frequency (>=3x reads) are flagged, and if they occur in protein coding genes the codon and AA changes are shown:
+Alleles at 10% frequency or more (>=3x reads) are flagged, and if they occur in protein coding genes the codon and AA changes are shown:
 
 <img width="1770" height="930" alt="filters-three-quarters" src="https://alexcritschristoph.github.io/dnacli/filters-three-quarters.gif" />
 

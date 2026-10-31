@@ -117,19 +117,25 @@ func (r *Reference) CodingImpact(contig string, pos int, refAllele, alt string) 
 	return impact
 }
 
+// findCDS returns the coding sequence a position belongs to. When several
+// cover it, the longest one wins, the same CDS the protein row displays.
 func (r *Reference) findCDS(contig string, pos int) *Feature {
 	feats := r.featuresIn(contig, pos, pos+1)
+	var best *Feature
 	for i, f := range feats {
 		if f.Kind != "CDS" {
 			continue
 		}
 		for _, rng := range f.Ranges {
 			if pos >= rng.Start && pos < rng.End {
-				return &feats[i]
+				if best == nil || codingLength(f) > codingLength(*best) {
+					best = &feats[i]
+				}
+				break
 			}
 		}
 	}
-	return nil
+	return best
 }
 
 // outsideGene names what an indel does where there is no coding sequence.
@@ -189,6 +195,15 @@ func indexOf(positions []int, pos int) int {
 		return i
 	}
 	return -1
+}
+
+// codingLength is how many reference bases a feature translates.
+func codingLength(f Feature) int {
+	n := 0
+	for _, rng := range f.Ranges {
+		n += rng.End - rng.Start
+	}
+	return n
 }
 
 func geneName(f Feature) string {

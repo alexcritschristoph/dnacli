@@ -38,6 +38,8 @@ type model struct {
 	exporting     bool // drawing a picture, so overlays stay out of it
 	contig        int
 	view          viewState
+	shownView     viewState // the view the screen on display describes
+	shownSpan     int       // bases the screen on display covers
 	rowOffset     int
 	wheelTurned   time.Time // when the wheel last turned, which tells a mouse from a track pad
 	wheelActed    time.Time // when a turn of the wheel last did something
@@ -45,8 +47,14 @@ type model struct {
 	moveZoom      int       // ladder steps the keys have asked for, not yet shown
 	moveAnchor    int       // the column a pending zoom holds still
 	moveScheduled bool      // a timer is booked to show the pending movement
+	async         bool      // whether a movement reads the file off the drawing thread
+	loading       bool      // a screen is being built while the last one stays up
+	stale         bool      // the model changed while a screen was being built
+	quiet         bool      // pan and zoom change the view without reading the file
+	spin          int       // which frame of the loading mark is shown
 
 	reads      []*Alignment
+	held       window       // the reads kept around the view, so a pan only asks for the new strip
 	cols       []columnSpec // what each screen column shows
 	inserts    map[int]int  // columns given over to insertions, by the position they follow
 	readLength int          // typical read length here, which decides how far we can zoom out
@@ -55,6 +63,7 @@ type model struct {
 	truncated  bool
 	sites      map[int]site
 	consensus  []byte // the base most reads carry, by position from the left edge
+	counted    counts // the per-base tallies of the last stretch counted
 	cov        []int
 	covPeak    int
 
@@ -71,6 +80,7 @@ type model struct {
 	hover        *Alignment
 	impacts      map[int]Impact
 	mouseOn      bool
+	allFeatures  bool // whether the gene row shows every GenBank feature, not just genes and CDSs
 	message      string
 	messageUntil time.Time
 	flash        *Alignment // a read lit up for a moment, to show what was copied
@@ -196,6 +206,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reload()
 		}
 	case tea.MouseMsg:
+		if m.loading {
+			return m, nil // the frame on screen is frozen, so there is nothing new to point at
+		}
 		return m, m.handleMouse(msg)
 	case tea.KeyMsg:
 		return m, tea.Batch(m.handleKey(msg), m.fade())
@@ -208,7 +221,31 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.fade()
 	case moveMsg:
-		m.showMove()
+		return m, m.showMove()
+	case loadedMsg:
+		if m.stale { // something other than a movement changed while the screen was built
+			m.held = msg.model.held // keep the reads the file gave back
+			m.loading, m.stale = false, false
+			m.reload()
+			return m, nil
+		}
+		// Keep what the hand did while the screen was built.
+		pan, zoom, anchor, scheduled := m.movePan, m.moveZoom, m.moveAnchor, m.moveScheduled
+		offset, message, messageUntil := m.rowOffset, m.message, m.messageUntil
+		flash, flashUntil := m.flash, m.flashUntil
+		*m = *msg.model
+		m.movePan, m.moveZoom, m.moveAnchor, m.moveScheduled = pan, zoom, anchor, scheduled
+		m.rowOffset = clamp(offset, 0, max(0, m.rowCount-m.layout().pileupRows))
+		m.message, m.messageUntil, m.flash, m.flashUntil = message, messageUntil, flash, flashUntil
+		if m.movePan != 0 || m.moveZoom != 0 { // keys arrived while the screen was built
+			return m, tea.Tick(movePause, func(time.Time) tea.Msg { return moveMsg{} })
+		}
+		return m, nil
+	case spinMsg:
+		if m.loading {
+			m.spin++
+			return m, m.spinTick()
+		}
 		return m, nil
 	}
 	return m, nil
@@ -260,6 +297,8 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "z":
 		m.view.bpp = 1
 		m.reload()
+	case "a":
+		m.allFeatures = !m.allFeatures
 	case "m":
 		m.mouseOn = !m.mouseOn
 		if m.mouseOn {
@@ -409,15 +448,53 @@ func (m *model) scheduleMove() tea.Cmd {
 }
 
 // showMove pans and zooms as far as the keys have asked since the last frame.
-func (m *model) showMove() {
+// The view moves only when a screen for it is ready, so the keys never leave the
+// picture describing a stretch it no longer shows.
+func (m *model) showMove() tea.Cmd {
+	m.moveScheduled = false
+	if m.movePan == 0 && m.moveZoom == 0 {
+		return nil // nothing moved, so nothing to build
+	}
+	if m.loading {
+		return nil // the keys keep counting up; the screen on its way will be followed by this
+	}
 	pan, zoom, anchor := m.movePan, m.moveZoom, m.moveAnchor
-	m.movePan, m.moveZoom, m.moveScheduled = 0, 0, false
+	m.movePan, m.moveZoom = 0, 0
+	m.quiet = true // the view moves now; the screen is built once below
 	if pan != 0 {
 		m.pan(pan)
 	}
 	if zoom != 0 {
 		m.zoom(zoom, anchor)
 	}
+	m.quiet = false
+	if !m.async {
+		m.reload()
+		return nil
+	}
+	target := m.view
+	m.view = m.shownView // the frame on screen stays the one the model describes
+	m.loading, m.stale = true, false
+	clone := *m
+	clone.view = target
+	return tea.Batch(func() tea.Msg {
+		clone.loading = false
+		clone.reload()
+		return loadedMsg{view: target, model: &clone}
+	}, m.spinTick())
+}
+
+// loadedMsg carries a screen built off the drawing thread.
+type loadedMsg struct {
+	view  viewState
+	model *model
+}
+
+// spinMsg asks for the next frame of the loading mark.
+type spinMsg struct{}
+
+func (m *model) spinTick() tea.Cmd {
+	return tea.Tick(90*time.Millisecond, func(time.Time) tea.Msg { return spinMsg{} })
 }
 
 // showRange frames a stretch of the reference, with a little room either side.
@@ -661,6 +738,12 @@ func (m *model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			}
 		}
 	}
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft &&
+		msg.Y == trackTop+l.geneRows && msg.X == gutterWidth-3 && l.geneRows > 0 &&
+		(m.allFeatures || m.hiddenFeatures(l.columns)) {
+		m.allFeatures = !m.allFeatures
+		return nil
+	}
 	if l.panel > 0 && msg.X >= m.width-l.panel {
 		m.clearHover() // the pointer has left the reads, so the line falls back to the variant
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
@@ -759,9 +842,137 @@ func (m *model) clickPanel(y int, l layout) {
 	}
 }
 
+// window is the stretch of reference whose reads are held, so that a pan asks
+// the file only for the strip that has scrolled into view.
+type window struct {
+	src        *Source
+	start, end int
+	contig     int
+	detail     bool
+	filter     Filter
+	reads      []*Alignment
+	seen       int
+	truncated  bool
+}
+
+// windowReads returns the reads overlapping a stretch, reading only the strips
+// the window does not already hold. It keeps a screen either side of the view,
+// so a small pan costs nothing and a large jump starts over.
+func (m *model) windowReads(contig, start, end int, detail bool) ([]*Alignment, int, bool) {
+	w := &m.held
+	name := m.contigs()[contig].Name
+	// A window with a base for every position can answer a wider view that only
+	// wants the differences, so zooming out does not have to read it all again.
+	stale := detail && !w.detail
+	if w.src != m.src || w.contig != contig || stale || w.filter != m.filter ||
+		w.start >= w.end || end <= w.start || start >= w.end {
+		*w = window{src: m.src, contig: contig, detail: detail, filter: m.filter, start: start, end: end}
+		w.reads, w.seen, w.truncated = m.src.Reads(name, start, end, m.filter, m.ref, detail)
+		m.counted = counts{} // the old tallies belong to another stretch
+		return w.reads, w.seen, w.truncated
+	}
+	left, right, added := w.start, w.end, false
+	share := func(width int) int { return max(256, maxAlignments*width/max(1, end-start)) }
+	// When a pan has only exposed a sliver, read a whole screen past the edge so
+	// the next few pans land inside what is held. A zoom exposes much more at
+	// once, so there it reads just what the view needs.
+	tile := m.span()
+	if end-start != m.shownSpan {
+		tile = 0 // a zoom or a resize takes much more than a pan sliver
+	}
+	if start < left { // panned left: read what ended before the held stretch
+		from := start
+		if left-start < tile/2 {
+			from = max(0, left-tile)
+		}
+		reads, seen, truncated := m.src.readsUpTo(name, from, left, share(left-from), m.filter, m.ref, detail)
+		for _, a := range reads {
+			if a.End <= left {
+				w.reads = append(w.reads, a)
+			}
+		}
+		w.start, w.seen, w.truncated, added = from, w.seen+seen, w.truncated || truncated, true
+	}
+	if end > right { // panned right: read what starts after the held stretch
+		to := end
+		if end-right < tile/2 {
+			to = min(m.contigs()[contig].Length, right+tile)
+		}
+		reads, seen, truncated := m.src.readsUpTo(name, right, to, share(to-right), m.filter, m.ref, detail)
+		for _, a := range reads {
+			if a.Start >= right {
+				w.reads = append(w.reads, a)
+			}
+		}
+		w.end, w.seen, w.truncated, added = to, w.seen+seen, w.truncated || truncated, true
+	}
+	if added {
+		sort.SliceStable(w.reads, func(i, j int) bool { return w.reads[i].Start < w.reads[j].Start })
+		w.detail = w.detail && detail // the strips just read may lack bases
+	}
+	// Let go of anything more than a screen away from the view.
+	lo, hi := max(0, start-m.span()), min(m.contigs()[contig].Length, end+m.span())
+	if lo > w.start || hi < w.end {
+		kept := w.reads[:0]
+		for _, a := range w.reads {
+			if a.End > lo && a.Start < hi {
+				kept = append(kept, a)
+			}
+		}
+		w.reads, w.start, w.end = kept, max(w.start, lo), min(w.end, hi)
+	}
+	out := make([]*Alignment, 0, len(w.reads))
+	for _, a := range w.reads {
+		if a.End > start && a.Start < end {
+			out = append(out, a)
+		}
+	}
+	return out, w.seen, w.truncated
+}
+
+// counts holds the per-base tallies of the stretch they were worked out for, so
+// that a pan only counts the columns that have scrolled into view.
+type counts struct {
+	src        *Source
+	contig     int
+	filter     Filter
+	start, end int
+	counts     [][4]int
+	depth      []int
+}
+
+// countBases tallies the bases of a stretch, reusing the columns it already has
+// tallies for and counting only the rest.
+func (m *model) countBases(reads []*Alignment, start, end int) ([][4]int, []int) {
+	c := &m.counted
+	if c.src != m.src || c.contig != m.contig || c.filter != m.filter {
+		*c = counts{src: m.src, contig: m.contig, filter: m.filter}
+	}
+	tallies, depth := make([][4]int, end-start), make([]int, end-start)
+	if from, to := max(start, c.start), min(end, c.end); from < to {
+		copy(tallies[from-start:], c.counts[from-c.start:to-c.start])
+		copy(depth[from-start:], c.depth[from-c.start:to-c.start])
+	}
+	if start < c.start {
+		countRange(tallies, depth, start, reads, start, min(end, c.start))
+	}
+	if end > c.end {
+		countRange(tallies, depth, start, reads, max(start, c.end), end)
+	}
+	c.start, c.end, c.counts, c.depth = start, end, tallies, depth
+	return tallies, depth
+}
+
 // loading ------------------------------------------------------------------
 
 func (m *model) reload() {
+	if m.quiet {
+		return // the movement below will build one screen for all of it
+	}
+	if m.loading {
+		m.stale = true // the screen being built is already out of date
+		return
+	}
 	m.movePan, m.moveZoom, m.moveScheduled = 0, 0, false // whatever was pending is now out of date
 	l := m.layout()
 	contig := m.contigs()[m.contig]
@@ -778,6 +989,7 @@ func (m *model) reload() {
 		m.consensus = nil
 		m.cov, m.covPeak = depthFromProfile(contig.Profile, contig.Length, m.view.start, m.view.bpp, l.columns)
 		m.impacts = map[int]Impact{}
+		m.shownView, m.shownSpan = m.view, span
 		return
 	}
 	// A screen wider than baseDetailSpan cannot show single bases, so keep only
@@ -785,21 +997,23 @@ func (m *model) reload() {
 	// The consensus of the reads is a per-base idea too, so it waits for a
 	// closer zoom rather than costing a pass over every base here.
 	detail := span <= baseDetailSpan
-	m.reads, m.readsSeen, m.truncated = m.src.Reads(contig.Name, m.view.start, end, m.filter, m.ref, detail)
+	m.reads, m.readsSeen, m.truncated = m.windowReads(m.contig, m.view.start, end, detail)
 	m.measureReads()
 	m.buildColumns(l.columns)
 	m.rowCount = packRows(m.reads, max(1, m.view.bpp), span)
 	if detail {
-		counts, depth := baseCounts(m.reads, m.view.start, end)
+		counts, depth := m.countBases(m.reads, m.view.start, end)
 		m.consensus = consensusBases(counts)
 		m.sites = callSites(counts, depth, m.ref, contig.Name, m.view.start)
 	} else {
 		m.consensus, m.sites = nil, map[int]site{} // nothing this wide is drawn from single bases
+		m.counted = counts{}
 	}
 	m.cov, m.covPeak = coverage(m.reads, m.cols, m.view.bpp)
 	m.rowOffset = clamp(m.rowOffset, 0, max(0, m.rowCount-l.pileupRows))
 	m.clearHover()
 	m.impacts = map[int]Impact{}
+	m.shownView, m.shownSpan = m.view, span
 }
 
 // baseColor is the color of one drawn base: the scheme's own color when the

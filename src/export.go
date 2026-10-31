@@ -212,7 +212,8 @@ func (m *model) blankRow(row, right int) bool {
 }
 
 func (m *model) writeSVG(path string, theme svgTheme) error {
-	m.reload() // make sure the reads and columns match the view being exported
+	m.loading, m.stale = false, true // build this frame here and now, whatever is in flight
+	m.reload()                       // make sure the reads and columns match the view being exported
 	m.exporting = true
 	m.View() // the frame on screen is the frame that gets exported
 	m.exporting = false
@@ -334,6 +335,16 @@ func glyphShape(r rune, col, row int, fill string) string {
 	if i, isBlock := blockIndex(r); isBlock {
 		h := svgCellH * float64(i) / 8
 		return rect(x, y+svgCellH-h, svgCellW, h, fill)
+	}
+	if r == '░' || r == '▒' || r == '▓' {
+		opacity := "0.25"
+		if r == '▒' {
+			opacity = "0.5"
+		} else if r == '▓' {
+			opacity = "0.75"
+		}
+		return fmt.Sprintf(`<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="%s" fill-opacity="%s"/>`,
+			x, y, svgCellW, svgCellH, fill, opacity)
 	}
 	switch r {
 	case '─':
