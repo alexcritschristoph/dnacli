@@ -24,9 +24,7 @@ Instant install into `~/.local/bin`:
 curl -fsSL https://raw.githubusercontent.com/alexcritschristoph/dnacli/main/install.sh | sh
 ```
 
-Or download the folder for your computer from the
-[latest release](https://github.com/alexcritschristoph/dnacli/releases/latest),
-unpack it, and run the binary inside:
+Or download the folder for your computer from the latest release, unpack it, and run the binary inside:
 
 | System | Download |
 | --- | --- |
