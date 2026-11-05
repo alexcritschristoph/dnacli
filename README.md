@@ -38,8 +38,6 @@ tar xzf ~/Downloads/dnacli-linux-amd64.tar.gz
 ~/Downloads/dnacli-linux-amd64/dnacli reads.bam reference.gb
 ```
 
-Note: A file fetched in a browser is quarantined by macOS the first time it runs, so open it once with a right click Open, or use the installer above.
-
 ### Examples
 
 View a BAM:
