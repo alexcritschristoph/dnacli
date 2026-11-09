@@ -113,4 +113,6 @@ dnacli is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
 Foundation, version 3. It comes with no warranty. See [LICENSE](LICENSE).
 
+Created by Alex Crits-Christoph in the [Lieberman Lab](https://lieberman.science/).
+
 There is no citation for dnacli, but if you use it, please provide a link to this repository.
