@@ -96,10 +96,12 @@ type tabHit struct {
 	tab      int
 }
 
-// profileMsg carries a file's finished coverage sketches back to the screen.
+// profileMsg carries a file's finished coverage sketches, and the checkpoints
+// found along the way, back to the screen.
 type profileMsg struct {
-	source   *Source
-	profiles map[string][]float64
+	source      *Source
+	profiles    map[string][]float64
+	checkpoints map[string][]checkpoint
 }
 
 // profileBins is the fewest coverage bins a contig gets. Longer contigs get
@@ -182,7 +184,7 @@ func sketchCoverage(src *Source) tea.Cmd {
 				profiles[c.Name] = own.CoverageProfile(c.Name, profileBinsFor(c.Length))
 			}
 		}
-		return profileMsg{src, profiles}
+		return profileMsg{src, profiles, own.checkpoints}
 	}
 }
 
@@ -200,6 +202,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if p := msg.profiles[c.Name]; p != nil {
 					s.Contigs[i].Profile = p
 				}
+			}
+			if msg.checkpoints != nil {
+				s.checkpoints = msg.checkpoints
 			}
 		}
 		if msg.source == m.src {

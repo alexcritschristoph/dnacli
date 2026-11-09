@@ -1234,7 +1234,7 @@ func TestOpenAddsTabsAndSwitches(t *testing.T) {
 	}
 	contig := src.Contigs[0]
 	src.Close()
-	m.Update(profileMsg{m.tabs[1], map[string][]float64{contig.Name: make([]float64, profileBins)}})
+	m.Update(profileMsg{source: m.tabs[1], profiles: map[string][]float64{contig.Name: make([]float64, profileBins)}})
 	if m.tabs[1].Contigs[0].Profile == nil {
 		t.Fatal("a coverage sketch did not reach the tab it was measured for")
 	}

@@ -115,6 +115,50 @@ func TestMismatchModesPerformance(t *testing.T) {
 	}
 }
 
+// TestDenseContigCheckpoints checks that a region deep inside a small, dense
+// contig starts at a checkpoint instead of at the contig's first record once
+// the coverage sketch has run, and that it still finds exactly the same reads.
+func TestDenseContigCheckpoints(t *testing.T) {
+	src, err := OpenAlignments("testdata/mito_human.bam")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer src.Close()
+	contig := src.Contigs[0]
+	start := contig.Length / 2
+	want, wantSeen, _ := src.Reads(contig.Name, start, start+100, defaultFilter(), nil, true)
+
+	begin := time.Now()
+	src.CoverageProfile(contig.Name, profileBinsFor(contig.Length))
+	sketch := time.Since(begin)
+
+	begin = time.Now()
+	got, gotSeen, _ := src.Reads(contig.Name, start, start+100, defaultFilter(), nil, true)
+	read := time.Since(begin)
+
+	if len(src.checkpoints[contig.Name]) == 0 {
+		t.Fatal("the coverage sketch made no checkpoints")
+	}
+	chunks, err := src.index.Chunks(src.refs[contig.Name], start, start+100)
+	if err != nil || len(chunks) == 0 {
+		t.Fatalf("no index chunk covers the region: %v", err)
+	}
+	at, ok := src.checkpointBefore(contig.Name, start)
+	if !ok || !offsetBefore(chunks[0].Begin, at.Offset) {
+		t.Fatal("the region cannot start at a checkpoint")
+	}
+	if len(got) != len(want) || gotSeen != wantSeen {
+		t.Fatalf("the checkpointed read found %d of %d reads, want %d of %d", len(got), gotSeen, len(want), wantSeen)
+	}
+	for i := range want {
+		if got[i].Name != want[i].Name {
+			t.Fatalf("read %d is %s, want %s", i, got[i].Name, want[i].Name)
+		}
+	}
+	t.Logf("dense contig: sketch %v, region of %d reads in %v",
+		sketch.Round(time.Microsecond), len(got), read.Round(time.Microsecond))
+}
+
 func TestPanningStaysSmooth(t *testing.T) {
 	m := ready(t, "multi_contig_uneven")
 	start := time.Now()

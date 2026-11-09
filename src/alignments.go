@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/biogo/hts/bam"
+	"github.com/biogo/hts/bgzf"
 	"github.com/biogo/hts/sam"
 )
 
@@ -108,6 +109,14 @@ type Contig struct {
 	Profile []float64 // coverage sketch, filled in the background
 }
 
+// checkpoint is a place a scan can pick a contig up again. End is where the
+// reads before it stop, so a region starting at or after End can begin at
+// Offset instead of at the contig's first record.
+type checkpoint struct {
+	End    int
+	Offset bgzf.Offset
+}
+
 // Filter decides which reads are worth drawing.
 type Filter struct {
 	MinMapQ        int
@@ -158,11 +167,17 @@ type Source struct {
 	refs    map[string]*sam.Reference
 	memory  map[string][]*sam.Record
 	longest int // longest read seen, used to seek within in-memory records
+	// checkpoints let a region deep inside a dense contig start near its own
+	// records rather than decoding everything from the contig's first one.
+	// A BAI only marks every 16 kb, which is the whole contig for mitochondrial
+	// and viral references.
+	checkpoints map[string][]checkpoint
 }
 
 const (
-	maxAlignments = 20000 // as many reads as we will hold for one screen
-	sampleSlices  = 64    // how many places we sample when a region holds far more
+	maxAlignments   = 20000 // as many reads as we will hold for one screen
+	sampleSlices    = 64    // how many places we sample when a region holds far more
+	checkpointEvery = 1024  // records between checkpoints in a dense contig
 )
 
 func OpenAlignments(path string) (*Source, error) {
@@ -170,7 +185,7 @@ func OpenAlignments(path string) (*Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Source{Path: path, file: f, refs: map[string]*sam.Reference{}}
+	s := &Source{Path: path, file: f, refs: map[string]*sam.Reference{}, checkpoints: map[string][]checkpoint{}}
 	var header *sam.Header
 	if strings.HasSuffix(strings.ToLower(path), ".sam") {
 		r, err := sam.NewReader(f)
@@ -275,6 +290,9 @@ func (s *Source) each(contig string, start, end int, visit func(*sam.Record) boo
 	if err != nil {
 		return nil // no chunks overlap the region
 	}
+	if at, ok := s.checkpointBefore(contig, start); ok && len(chunks) > 0 && offsetBefore(chunks[0].Begin, at.Offset) {
+		chunks[0].Begin = at.Offset
+	}
 	it, err := bam.NewIterator(s.reader, chunks)
 	if err != nil {
 		return err
@@ -290,6 +308,22 @@ func (s *Source) each(contig string, start, end int, visit func(*sam.Record) boo
 		}
 	}
 	return it.Error()
+}
+
+// checkpointBefore is the last checkpoint whose earlier reads all stop before
+// start, or false when the contig has none that far along.
+func (s *Source) checkpointBefore(contig string, start int) (checkpoint, bool) {
+	points := s.checkpoints[contig]
+	i := sort.Search(len(points), func(i int) bool { return points[i].End > start })
+	if i == 0 {
+		return checkpoint{}, false
+	}
+	return points[i-1], true
+}
+
+// before says whether one virtual offset comes before another in the file.
+func offsetBefore(a, b bgzf.Offset) bool {
+	return a.File < b.File || a.File == b.File && a.Block < b.Block
 }
 
 // Reads returns the alignments overlapping a region that pass the filter, and
@@ -520,7 +554,8 @@ func auxInt(v sam.Aux) (int, bool) {
 }
 
 // CoverageProfile measures mean read depth in equal bins across a whole
-// contig. It reads every record, so it belongs in the background.
+// contig. It reads every record, so it belongs in the background, and while it
+// goes it notes checkpoints for later region reads.
 func (s *Source) CoverageProfile(contig string, bins int) []float64 {
 	c := s.contig(contig)
 	if c == nil || c.Length == 0 {
@@ -528,8 +563,16 @@ func (s *Source) CoverageProfile(contig string, bins int) []float64 {
 	}
 	profile := make([]float64, bins)
 	width := float64(c.Length) / float64(bins)
+	s.checkpoints[contig] = s.checkpoints[contig][:0]
+	n, maxEnd := 0, 0
 	s.each(contig, 0, c.Length, func(rec *sam.Record) bool {
-		from, to := float64(rec.Pos), float64(rec.End()) // End walks the CIGAR, so ask it once
+		if s.reader != nil && n%checkpointEvery == 0 {
+			s.checkpoints[contig] = append(s.checkpoints[contig], checkpoint{End: maxEnd, Offset: s.reader.LastChunk().Begin})
+		}
+		n++
+		end := rec.End()
+		maxEnd = max(maxEnd, end)
+		from, to := float64(rec.Pos), float64(end)
 		first, last := int(from/width), int((to-1)/width)
 		for b := max(first, 0); b <= last && b < bins; b++ {
 			lo, hi := float64(b)*width, float64(b+1)*width
