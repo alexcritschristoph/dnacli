@@ -211,6 +211,27 @@ func TestDenseContigUsesTheSketchForAThinSample(t *testing.T) {
 	if took > 50*time.Millisecond {
 		t.Fatalf("a pan in the sketch took %v", took)
 	}
+
+	// Zooming crosses the boundary where the sketch gives way to real reads
+	// and back. Time both directions.
+	anchor := 75
+	begin = time.Now()
+	m.zoom(-1, anchor)
+	in := time.Since(begin)
+	if !m.showReads() {
+		t.Fatal("zooming in did not bring the reads back")
+	}
+	begin = time.Now()
+	m.zoom(1, anchor)
+	out := time.Since(begin)
+	t.Logf("dense zoom: 10 to 5 bases per column %v, 5 to 10 %v",
+		in.Round(time.Microsecond), out.Round(time.Microsecond))
+	if in > 500*time.Millisecond || out > 500*time.Millisecond {
+		t.Fatalf("crossing the sketch boundary took %v in and %v out", in, out)
+	}
+	if m.showReads() {
+		t.Fatal("zooming out did not return to the sketch")
+	}
 }
 
 // TestDenseSampledViewFillsTheScreen checks that a sample is spread through each
@@ -520,6 +541,20 @@ func BenchmarkDenseSketchPan(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		m.pan(100)
+		m.View()
+	}
+}
+
+// Zoom out through the whole read range and back, crossing the point where the
+// pileup gives way to the sketch in both directions.
+func BenchmarkDenseZoom(b *testing.B) {
+	m := screenModel(b, screenCases[len(screenCases)-1])
+	m.view.bpp = 1
+	m.reload()
+	steps := []int{1, 1, 1, 1, -1, -1, -1, -1} // 1 → 2 → 3 → 5 → 10 and back
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.zoom(steps[i%len(steps)], m.layout().columns/2)
 		m.View()
 	}
 }
