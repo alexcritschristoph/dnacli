@@ -204,21 +204,11 @@ func TestAPanDoesNotWaitForTheFile(t *testing.T) {
 	lines := strings.Split(plain(m.View()), "\n")
 	l := m.layout()
 	left := gutterWidth - 2 - loadingWidth
-	bright := 0
-	for row := 0; row < loadingHeight; row++ {
-		line := []rune(lines[l.pileupTop+row])
-		for col := 0; col < loadingWidth; col++ {
-			switch line[left+col] {
-			case '•':
-			case '●':
-				bright++
-			default:
-				t.Fatalf("the loading mark at %d,%d is %q, want a dot", row, col, line[left+col])
-			}
+	line := []rune(lines[l.pileupTop])
+	for i := 0; i < loadingWidth; i++ {
+		if line[left+i] != '·' {
+			t.Fatalf("the loading mark at %d is %q, want a dot", i, line[left+i])
 		}
-	}
-	if bright != 1 {
-		t.Fatalf("the loading rectangle has %d bright dots, want one going round", bright)
 	}
 	batch, ok := cmd().(tea.BatchMsg)
 	if !ok || len(batch) == 0 {

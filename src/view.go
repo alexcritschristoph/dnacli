@@ -166,14 +166,9 @@ func (g grid) fill(row, from, to int, r rune, s cellStyle) {
 	}
 }
 
-// loadingRing is the dotted rectangle under the depth while a screen is built.
-// The bright dot walks around its edge.
-const loadingWidth, loadingHeight = (gutterWidth - 2) * 9 / 10, 2
-
-var loadingRing = [loadingWidth * loadingHeight][2]int{
-	{0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}, {0, 5}, {0, 6}, {0, 7}, {0, 8},
-	{1, 8}, {1, 7}, {1, 6}, {1, 5}, {1, 4}, {1, 3}, {1, 2}, {1, 1}, {1, 0},
-}
+// loadingWidth is how many dots the loading mark spans: 90% of the gutter
+// column under the depth.
+const loadingWidth = (gutterWidth - 2) * 9 / 10
 
 func (m *model) View() string {
 	if m.width < 40 || m.height < 18 {
@@ -185,27 +180,30 @@ func (m *model) View() string {
 		if len(m.frame[0]) != m.width || len(m.frame) != m.height {
 			return m.frame.String() // the window changed size mid-load
 		}
-		// The dotted rectangle sits in the gutter just under the depth label,
-		// where it covers no read and cannot be mistaken for one.
+		// A line of small dots in the gutter just under the depth label,
+		// where it covers no read and cannot be mistaken for one. The bright
+		// dot runs along the line and back.
 		row, start := m.layout().pileupTop, gutterWidth-2-loadingWidth
-		var saved [loadingHeight][loadingWidth]cell
-		for i, at := range loadingRing {
-			r, style := '•', cellStyle{fg: colorMuted, bg: colorBackdrop}
-			if i == m.spin%len(loadingRing) {
-				r, style = '●', cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}
-			}
-			rr, cc := row+at[0], start+at[1]
-			if rr < 0 || rr >= len(m.frame) || cc >= len(m.frame[rr]) {
+		active := m.spin % (2*loadingWidth - 2)
+		if active >= loadingWidth {
+			active = 2*loadingWidth - 2 - active
+		}
+		var saved [loadingWidth]cell
+		for i := 0; i < loadingWidth; i++ {
+			if row < 0 || row >= len(m.frame) || start+i >= len(m.frame[row]) {
 				continue
 			}
-			saved[at[0]][at[1]] = m.frame[rr][cc]
-			m.frame[rr][cc] = cell{r, style}
+			style := cellStyle{fg: colorMuted, bg: colorBackdrop}
+			if i == active {
+				style = cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}
+			}
+			saved[i] = m.frame[row][start+i]
+			m.frame[row][start+i] = cell{'·', style}
 		}
 		frame := m.frame.String()
-		for _, at := range loadingRing {
-			rr, cc := row+at[0], start+at[1]
-			if rr >= 0 && rr < len(m.frame) && cc < len(m.frame[rr]) {
-				m.frame[rr][cc] = saved[at[0]][at[1]]
+		for i := 0; i < loadingWidth; i++ {
+			if row >= 0 && row < len(m.frame) && start+i < len(m.frame[row]) {
+				m.frame[row][start+i] = saved[i]
 			}
 		}
 		return frame
