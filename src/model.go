@@ -1003,7 +1003,7 @@ func (m *model) reload() {
 	// closer zoom rather than costing a pass over every base here.
 	detail := span <= baseDetailSpan
 	var oldRows map[string]int
-	if m.held.src == m.src && m.held.contig == m.contig && m.shownSpan == span {
+	if m.held.src == m.src && m.held.contig == m.contig && m.shownSpan == span && m.shownView.start != m.view.start {
 		oldRows = make(map[string]int, len(m.reads))
 		for _, a := range m.reads {
 			oldRows[a.Name] = a.Row
