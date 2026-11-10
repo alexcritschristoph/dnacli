@@ -166,9 +166,9 @@ func (g grid) fill(row, from, to int, r rune, s cellStyle) {
 	}
 }
 
-// loadingRing is the square of dots under the depth while a screen is built.
-// The bright dot walks around its edge.
-var loadingRing = [8][2]int{{0, 0}, {0, 2}, {0, 4}, {1, 4}, {2, 4}, {2, 2}, {2, 0}, {1, 0}}
+// loadingSpin is the small mark that turns under the depth while a screen is
+// being built.
+var loadingSpin = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
 func (m *model) View() string {
 	if m.width < 40 || m.height < 18 {
@@ -180,30 +180,19 @@ func (m *model) View() string {
 		if len(m.frame[0]) != m.width || len(m.frame) != m.height {
 			return m.frame.String() // the window changed size mid-load
 		}
-		// The square sits in the empty gutter under the depth, where it covers
-		// no read and cannot be mistaken for one.
+		// The mark turns in the middle of the gutter just under the depth
+		// label, where it covers no read and cannot be mistaken for one.
 		row := m.layout().pileupTop
-		var saved [3][5]cell
-		for i, at := range loadingRing {
-			r, style := '○', cellStyle{fg: colorDim, bg: colorBackdrop}
-			if i == m.spin%len(loadingRing) {
-				r, style = '●', cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}
-			}
-			rr, cc := row+at[0], at[1]
-			if rr < 0 || rr >= len(m.frame) || cc >= len(m.frame[rr]) {
-				continue
-			}
-			saved[at[0]][cc] = m.frame[rr][cc]
-			m.frame[rr][cc] = cell{r, style}
+		label := m.depthLabel()
+		col := gutterWidth - 2 - len(label) + len(label)/2
+		if row >= 0 && row < len(m.frame) && col >= 0 && col < len(m.frame[row]) {
+			saved := m.frame[row][col]
+			m.frame[row][col] = cell{loadingSpin[m.spin%len(loadingSpin)], cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}}
+			frame := m.frame.String()
+			m.frame[row][col] = saved
+			return frame
 		}
-		frame := m.frame.String()
-		for _, at := range loadingRing {
-			rr, cc := row+at[0], at[1]
-			if rr >= 0 && rr < len(m.frame) && cc < len(m.frame[rr]) {
-				m.frame[rr][cc] = saved[at[0]][cc]
-			}
-		}
-		return frame
+		return m.frame.String()
 	}
 	m.refreshBars()
 	l := m.layout()
@@ -542,13 +531,7 @@ func (m *model) drawTracks(g grid, l layout) {
 	}
 
 	// coverage
-	depth := "depth"
-	if m.covPeak > 0 {
-		depth = "depth " + compactCount(m.covPeak)
-		if m.truncated {
-			depth = "sample"
-		}
-	}
+	depth := m.depthLabel()
 	g.draw(row, gutterWidth-2-len(depth), depth, label)
 	blocks := []rune("▁▂▃▄▅▆▇█")
 	for col, n := range m.cov {
@@ -1063,6 +1046,18 @@ func comma(n int) string {
 		s = s[:i] + "," + s[i:]
 	}
 	return s
+}
+
+// depthLabel is what the depth track is called, kept short enough for the
+// gutter.
+func (m *model) depthLabel() string {
+	switch {
+	case m.covPeak == 0:
+		return "depth"
+	case m.truncated:
+		return "sample"
+	}
+	return "depth " + compactCount(m.covPeak)
 }
 
 // compactCount writes a count in the four characters the gutter has room for,
