@@ -1002,10 +1002,17 @@ func (m *model) reload() {
 	// The consensus of the reads is a per-base idea too, so it waits for a
 	// closer zoom rather than costing a pass over every base here.
 	detail := span <= baseDetailSpan
+	var oldRows map[string]int
+	if m.held.src == m.src && m.held.contig == m.contig && m.shownSpan == span {
+		oldRows = make(map[string]int, len(m.reads))
+		for _, a := range m.reads {
+			oldRows[a.Name] = a.Row
+		}
+	}
 	m.reads, m.readsSeen, m.truncated = m.windowReads(m.contig, m.view.start, end, detail)
 	m.measureReads()
 	m.buildColumns(l.columns)
-	m.rowCount = packRows(m.reads, max(1, m.view.bpp), span)
+	m.rowCount = packRows(m.reads, max(1, m.view.bpp), span, oldRows)
 	if detail {
 		counts, depth := m.countBases(m.reads, m.view.start, end)
 		m.consensus = consensusBases(counts)

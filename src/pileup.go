@@ -4,8 +4,10 @@ import "sort"
 
 // packRows gives every read a row of the pileup, keeping the two reads of a
 // pair on the same row so that a pair is easy to follow. Reads must arrive in
-// coordinate order. It returns the number of rows used.
-func packRows(reads []*Alignment, gapBases, windowBases int) int {
+// coordinate order. Old rows, when given, keep reads that were already on
+// screen where they were, so a pan slides the picture sideways instead of
+// repacking every row. It returns the number of rows used.
+func packRows(reads []*Alignment, gapBases, windowBases int, oldRows map[string]int) int {
 	var groups [][]*Alignment
 	pairs := map[string]int{} // the group holding each paired read's name
 	for _, a := range reads {
@@ -30,12 +32,41 @@ func packRows(reads []*Alignment, gapBases, windowBases int) int {
 		rowEnd = append(rowEnd, end+gapBases)
 		return len(rowEnd) - 1
 	}
-
-	for _, mates := range groups {
+	bounds := func(mates []*Alignment) (int, int) {
 		start, end := mates[0].Start, mates[0].End
 		for _, a := range mates[1:] {
 			start, end = min(start, a.Start), max(end, a.End)
 		}
+		return start, end
+	}
+
+	placed := make([]bool, len(groups))
+	for i, mates := range groups {
+		old, ok := oldRows[mates[0].Name]
+		if !ok {
+			continue
+		}
+		start, end := bounds(mates)
+		if end-start > max(windowBases, 2000) { // far-apart mates keep their own rows
+			continue
+		}
+		for len(rowEnd) <= old {
+			rowEnd = append(rowEnd, 0)
+		}
+		if start < rowEnd[old] {
+			continue // the old row is taken; find another below
+		}
+		rowEnd[old] = end + gapBases
+		for _, a := range mates {
+			a.Row = old
+		}
+		placed[i] = true
+	}
+	for i, mates := range groups {
+		if placed[i] {
+			continue
+		}
+		start, end := bounds(mates)
 		if end-start > max(windowBases, 2000) { // mates too far apart to share a row
 			for _, a := range mates {
 				a.Row = place(a.Start, a.End)
@@ -46,6 +77,9 @@ func packRows(reads []*Alignment, gapBases, windowBases int) int {
 		for _, a := range mates {
 			a.Row = row
 		}
+	}
+	for len(rowEnd) > 0 && rowEnd[len(rowEnd)-1] == 0 {
+		rowEnd = rowEnd[:len(rowEnd)-1]
 	}
 	return len(rowEnd)
 }

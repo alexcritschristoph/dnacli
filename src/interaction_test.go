@@ -101,6 +101,40 @@ func TestZoomStaysCentredAndStopsAtWholeContig(t *testing.T) {
 	}
 }
 
+func TestPanningKeepsAVisibleReadOnItsRow(t *testing.T) {
+	m := ready(t, "influenza_h1n1")
+	m.view.bpp = 1
+	m.reload()
+	m.goTo(m.contigs()[m.contig].Length / 2)
+	step := 10 * m.view.bpp
+	var chosen *Alignment
+	for _, a := range m.reads {
+		top := a.Row - m.rowOffset
+		if top >= 0 && top < m.layout().pileupRows && a.Start > m.view.start+step {
+			chosen = a
+			break
+		}
+	}
+	if chosen == nil {
+		t.Skip("no read fully inside the view")
+	}
+	row, top := chosen.Row, chosen.Row-m.rowOffset
+	m.pan(step)
+	for _, a := range m.reads {
+		if a.Name != chosen.Name {
+			continue
+		}
+		if a.Row != row {
+			t.Fatalf("read %s moved from row %d to %d after a pan", a.Name, row, a.Row)
+		}
+		if a.Row-m.rowOffset != top {
+			t.Fatalf("read %s moved from screen row %d to %d after a pan", a.Name, top, a.Row-m.rowOffset)
+		}
+		return
+	}
+	t.Skip("the read left the view")
+}
+
 func TestABurstOfPanningLandsOnce(t *testing.T) {
 	m := ready(t, "viral_variants")
 	m.view.bpp = 10
