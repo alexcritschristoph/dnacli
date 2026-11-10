@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
+	"unsafe"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -32,7 +34,9 @@ func loadTestModel(stem string) (*model, error) {
 		refPath = "testdata/" + stem + ".fa"
 		ref, _ = LoadReference(refPath)
 	}
-	ref.MatchContigs(src.Contigs)
+	if ref != nil {
+		ref.MatchContigs(src.Contigs)
+	}
 	variants, _ := LoadVariants("testdata/" + stem + ".vcf")
 	return newModel(src, ref, refPath, variants), nil
 }
@@ -80,6 +84,43 @@ func BenchmarkStartup(b *testing.B) {
 				m, err := loadTestModel(stem)
 				if err != nil {
 					b.Fatal(err)
+				}
+				m.src.Close()
+			}
+		})
+	}
+}
+
+// BenchmarkFootprint builds each dataset the way startup does, including the
+// background coverage sketch, and reports the heap it keeps and the checkpoint
+// index it builds. Run it with -benchtime=1x; one build per dataset keeps the
+// retained-heap numbers clean.
+func BenchmarkFootprint(b *testing.B) {
+	datasets := append([]string{"dense_mito"}, benchDatasets...)
+	for _, stem := range datasets {
+		b.Run(stem, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				m, err := loadTestModel(stem)
+				if err != nil {
+					b.Fatal(err)
+				}
+				m.width, m.height = 150, 44
+				m.Update(sketchCoverage(m.src)())
+				if i == 0 {
+					b.StopTimer()
+					runtime.GC()
+					var stats runtime.MemStats
+					runtime.ReadMemStats(&stats)
+					points, bytes := 0, 0
+					for _, pts := range m.src.checkpoints {
+						points += len(pts)
+						bytes += len(pts) * int(unsafe.Sizeof(checkpoint{}))
+					}
+					b.ReportMetric(float64(stats.HeapAlloc)/(1<<20), "heap-MB")
+					b.ReportMetric(float64(points), "checkpoints")
+					b.ReportMetric(float64(bytes)/(1<<10), "checkpoint-KB")
+					b.StartTimer()
 				}
 				m.src.Close()
 			}

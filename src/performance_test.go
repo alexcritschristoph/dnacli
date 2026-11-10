@@ -119,17 +119,31 @@ func TestMismatchModesPerformance(t *testing.T) {
 // contig starts at a checkpoint instead of at the contig's first record once
 // the coverage sketch has run, and that it still finds exactly the same reads.
 func TestDenseContigCheckpoints(t *testing.T) {
-	src, err := OpenAlignments("testdata/mito_human.bam")
+	src, err := OpenAlignments("testdata/dense_mito.bam")
 	if err != nil {
 		t.Skip(err)
 	}
 	defer src.Close()
-	contig := src.Contigs[0]
+	if src.index == nil {
+		t.Skip("dense_mito.bam has no index")
+	}
+	var contig Contig
+	for _, c := range src.Contigs {
+		if c.Reads > 0 {
+			contig = c
+			break
+		}
+	}
+	if contig.Length == 0 {
+		t.Skip("dense_mito.bam has no mapped reads")
+	}
 	start := contig.Length / 2
 	want, wantSeen, _ := src.Reads(contig.Name, start, start+100, defaultFilter(), nil, true)
 
 	begin := time.Now()
-	src.CoverageProfile(contig.Name, profileBinsFor(contig.Length))
+	m := newModel(src, nil, "", nil)
+	m.width, m.height = 150, 44
+	m.Update(sketchCoverage(src)())
 	sketch := time.Since(begin)
 
 	begin = time.Now()
@@ -251,15 +265,17 @@ type screenCase struct {
 	bpp              int
 	middle           bool // start at the middle of the contig, where reads are dense
 	long             bool // whether this is one of the ultra-long-read screens
+	sketch           bool // build the coverage sketch and its checkpoints first
 }
 
 var screenCases = []screenCase{
-	{"long-read plasmid", "testdata/bf_fragilis.bam", "testdata/bf_fragilis.gb", "NC_006873.1", 200, false, true},
-	{"long-read chromosome", "testdata/bf_fragilis.bam", "testdata/bf_fragilis.fa", "NC_003228.3", 150, true, true},
-	{"short-read control", "testdata/bf_fragilis_short_20x.bam", "testdata/bf_fragilis.fa", "NC_003228.3", 150, true, false},
-	{"ONT 203x", "testdata/hiv1.bam", "testdata/hiv1.gb", "", 50, false, false},
-	{"dense 300x", "testdata/influenza_h1n1.bam", "", "", 20, false, false},
-	{"genome 40x", "testdata/ecoli_k12.bam", "testdata/ecoli_k12.gb", "", 50, false, false},
+	{"long-read plasmid", "testdata/bf_fragilis.bam", "testdata/bf_fragilis.gb", "NC_006873.1", 200, false, true, false},
+	{"long-read chromosome", "testdata/bf_fragilis.bam", "testdata/bf_fragilis.fa", "NC_003228.3", 150, true, true, false},
+	{"short-read control", "testdata/bf_fragilis_short_20x.bam", "testdata/bf_fragilis.fa", "NC_003228.3", 150, true, false, false},
+	{"ONT 203x", "testdata/hiv1.bam", "testdata/hiv1.gb", "", 50, false, false, false},
+	{"dense 300x", "testdata/influenza_h1n1.bam", "", "", 20, false, false, false},
+	{"genome 40x", "testdata/ecoli_k12.bam", "testdata/ecoli_k12.gb", "", 50, false, false, false},
+	{"dense mitochondrial 36,000x", "testdata/dense_mito.bam", "", "NC_013700.1", 1, true, false, true},
 }
 
 // screenModel prepares one case the way opening the file does: the panel is
@@ -297,6 +313,9 @@ func screenModel(tb testing.TB, c screenCase) *model {
 	contig := m.contigs()[m.contig]
 	if contig.Length == 0 {
 		tb.Fatalf("%s chose the empty contig %q", c.name, contig.Name)
+	}
+	if c.sketch {
+		m.Update(sketchCoverage(src)())
 	}
 	start := 0
 	if c.middle {

@@ -7,9 +7,16 @@
 #   COUNT=5 BENCHTIME=2s ./bench.sh
 #
 # The benchmarks read the fixtures in src/testdata/, which are not in this
-# repository, so this is a script for a checkout that has them.
+# repository, so this is a script for a checkout that has them. They include
+# testdata/dense_mito.bam, 4.1 million reads on one 16.7 kb mitochondrial
+# contig. BenchmarkFootprint reports its retained heap and checkpoint bytes;
+# the Load/ColdLoad/Frame benchmarks include its screen latency.
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# Keep a runaway benchmark from filling the machine. The dense fixture in
+# testdata/dense_mito.bam has 4.1 million reads on one 16.7 kb contig.
+export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
 
 if [ ! -d src/testdata ]; then
 	echo "bench.sh needs the fixtures in src/testdata/, which are not in this repository." >&2
@@ -41,11 +48,19 @@ go test ./src -run '^$' -bench '^BenchmarkStartup' -benchtime=1x -cpu 1 >/dev/nu
 	echo "# cpu:     $cpu"
 	echo "# cores:   $cores"
 	echo "# go:      $(go version)"
+	echo "# memory:  GOMEMLIMIT=$GOMEMLIMIT"
 	echo "# code:    $(cat src/*.go | sha256 | cut -c1-12)"
 	echo "# filter:  $pattern"
 	echo "# samples: $count x $benchtime"
 	echo
-	go test ./src -run '^$' -bench "$pattern" -benchmem -count="$count" -benchtime="$benchtime" -cpu 1 -timeout 20m
+	go test ./src -run '^$' -bench "$pattern" -skip '^BenchmarkFootprint$' -benchmem -count="$count" -benchtime="$benchtime" -cpu 1 -timeout 20m
+	case "$pattern" in
+	*Footprint*|.)
+		echo
+		echo "# memory footprint: one build per dataset, so earlier runs cannot skew the retained heap"
+		go test ./src -run '^$' -bench '^BenchmarkFootprint$' -benchmem -benchtime=1x -count=1 -cpu 1 -timeout 20m
+		;;
+	esac
 } | tee "$log"
 
 previous=$(ls -1t benchmarks/*.txt 2>/dev/null | sed -n 2p || true)
