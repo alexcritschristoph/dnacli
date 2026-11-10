@@ -166,8 +166,9 @@ func (g grid) fill(row, from, to int, r rune, s cellStyle) {
 	}
 }
 
-// loadingMark is the bar that sweeps under the depth while a screen is built.
-var loadingMark = []string{"█░░", "██░", "███", "░██", "░░█"}
+// loadingRing is the square of dots under the depth while a screen is built.
+// The bright dot walks around its edge.
+var loadingRing = [8][2]int{{0, 0}, {0, 2}, {0, 4}, {1, 4}, {2, 4}, {2, 2}, {2, 0}, {1, 0}}
 
 func (m *model) View() string {
 	if m.width < 40 || m.height < 18 {
@@ -179,22 +180,27 @@ func (m *model) View() string {
 		if len(m.frame[0]) != m.width || len(m.frame) != m.height {
 			return m.frame.String() // the window changed size mid-load
 		}
-		// The mark sits in the empty gutter under the depth, where it covers no
-		// read and cannot be mistaken for one.
+		// The square sits in the empty gutter under the depth, where it covers
+		// no read and cannot be mistaken for one.
 		row := m.layout().pileupTop
-		mark := []rune(loadingMark[m.spin%len(loadingMark)])
-		var saved [3]cell
-		for col, r := range mark {
-			if row < 0 || row >= len(m.frame) || col >= len(m.frame[row]) {
+		var saved [3][5]cell
+		for i, at := range loadingRing {
+			r, style := '○', cellStyle{fg: colorDim, bg: colorBackdrop}
+			if i == m.spin%len(loadingRing) {
+				r, style = '●', cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}
+			}
+			rr, cc := row+at[0], at[1]
+			if rr < 0 || rr >= len(m.frame) || cc >= len(m.frame[rr]) {
 				continue
 			}
-			saved[col] = m.frame[row][col]
-			m.frame[row][col] = cell{r, cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}}
+			saved[at[0]][cc] = m.frame[rr][cc]
+			m.frame[rr][cc] = cell{r, style}
 		}
 		frame := m.frame.String()
-		for col := range mark {
-			if row >= 0 && row < len(m.frame) && col < len(m.frame[row]) {
-				m.frame[row][col] = saved[col]
+		for _, at := range loadingRing {
+			rr, cc := row+at[0], at[1]
+			if rr >= 0 && rr < len(m.frame) && cc < len(m.frame[rr]) {
+				m.frame[rr][cc] = saved[at[0]][cc]
 			}
 		}
 		return frame

@@ -201,10 +201,14 @@ func TestAPanDoesNotWaitForTheFile(t *testing.T) {
 	if !m.loading || m.view.start != start {
 		t.Fatalf("loading %v, start %d", m.loading, m.view.start)
 	}
-	frame := plain(m.View())
-	line := strings.Split(frame, "\n")[m.layout().pileupTop]
-	if mark := loadingMark[m.spin%len(loadingMark)]; !strings.HasPrefix(line, mark) {
-		t.Fatalf("the frame on screen has %q under the depth, not the loading mark %q", line[:min(len(line), 8)], mark)
+	lines := strings.Split(plain(m.View()), "\n")
+	l := m.layout()
+	ring := ""
+	for _, at := range loadingRing {
+		ring += string([]rune(lines[l.pileupTop+at[0]])[at[1]])
+	}
+	if strings.Count(ring, "●") != 1 || strings.Count(ring, "○") != len(loadingRing)-1 {
+		t.Fatalf("the frame on screen has %q under the depth, not one dot going round a square", ring)
 	}
 	batch, ok := cmd().(tea.BatchMsg)
 	if !ok || len(batch) == 0 {
