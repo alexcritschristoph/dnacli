@@ -105,7 +105,7 @@ func TestABurstOfPanningLandsOnce(t *testing.T) {
 	m := ready(t, "viral_variants")
 	m.view.bpp = 10
 	m.reload()
-	start, step := m.view.start, max(1, m.span()*7/50)
+	start, step := m.view.start, 10*m.view.bpp
 	begin := time.Now()
 	for i := 0; i < 40; i++ { // what a held arrow key sends while the last screen is still loading
 		m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
@@ -181,8 +181,8 @@ func TestAPanDoesNotWaitForTheFile(t *testing.T) {
 	if m.loading {
 		t.Fatal("the screen is still loading after the load came back")
 	}
-	if m.view.start != start+m.span()*7/50 {
-		t.Fatalf("the pan landed at %d, want %d", m.view.start, start+m.span()*7/50)
+	if m.view.start != start+10*m.view.bpp {
+		t.Fatalf("the pan landed at %d, want %d", m.view.start, start+10*m.view.bpp)
 	}
 }
 

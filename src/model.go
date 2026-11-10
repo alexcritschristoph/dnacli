@@ -267,7 +267,7 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.command, m.choice = "", 0 // any other key leaves the bar and works the view
 	}
-	step := max(1, m.span()*7/50) // a little under a fifth of the screen
+	step := max(1, 10*m.view.bpp) // ten screen columns, whatever the zoom
 	switch key {
 	case "t":
 		m.nextTab()
