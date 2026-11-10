@@ -4,10 +4,10 @@ import "sort"
 
 // packRows gives every read a row of the pileup, keeping the two reads of a
 // pair on the same row so that a pair is easy to follow. Reads must arrive in
-// coordinate order. Old rows, when given, keep reads that were already on
-// screen where they were, so a pan slides the picture sideways instead of
-// repacking every row. It returns the number of rows used.
-func packRows(reads []*Alignment, gapBases, windowBases int, oldRows map[string]int) int {
+// coordinate order. A read marked rowSeen keeps the row the last screen gave
+// it, so a pan slides the picture sideways instead of repacking every row. It
+// returns the number of rows used.
+func packRows(reads []*Alignment, gapBases, windowBases int) int {
 	var groups [][]*Alignment
 	pairs := map[string]int{} // the group holding each paired read's name
 	for _, a := range reads {
@@ -42,8 +42,8 @@ func packRows(reads []*Alignment, gapBases, windowBases int, oldRows map[string]
 
 	placed := make([]bool, len(groups))
 	for i, mates := range groups {
-		old, ok := oldRows[mates[0].Name]
-		if !ok {
+		old := mates[0].Row
+		if !mates[0].rowSeen {
 			continue
 		}
 		start, end := bounds(mates)

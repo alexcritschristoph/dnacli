@@ -40,6 +40,7 @@ type Alignment struct {
 	LeadClip      int   // soft-clipped bases drawn before the alignment starts
 	TailClip      int   // and after it ends
 	Row           int   // filled in by the pileup packer
+	rowSeen       bool  // whether the last screen showed this read, so its row carries over
 }
 
 func (a *Alignment) Reverse() bool { return a.Flags&sam.Reverse != 0 }
@@ -176,9 +177,9 @@ type Source struct {
 }
 
 const (
-	maxAlignments   = 20000 // as many reads as we will hold for one screen
-	sampleSlices    = 64    // how many places we sample when a region holds far more
-	checkpointEvery = 1024  // records between checkpoints in a dense contig
+	maxAlignments   = 5000 // the most reads one screen holds; a dense pileup is sampled down to this
+	sampleSlices    = 64   // how many places we sample when a region holds far more
+	checkpointEvery = 1024 // records between checkpoints in a dense contig
 )
 
 func OpenAlignments(path string) (*Source, error) {
@@ -347,15 +348,27 @@ func (s *Source) readsUpTo(contig string, start, end, limit int, filter Filter, 
 	}
 	// Take an equal share from slices spread evenly across the region, in one
 	// pass: reading each slice on its own would decompress the blocks between
-	// them again and again.
+	// them again and again. Within a slice, keep every stride-th read rather
+	// than the first few, so the sample covers the slice instead of bunching at
+	// its left edge.
 	width, per := max(1, (end-start)/sampleSlices), max(1, limit/sampleSlices)
+	stride, seenIn := make([]int, sampleSlices), make([]int, sampleSlices)
+	for i := range stride {
+		from := start + i*width
+		to := min(end, from+width)
+		stride[i] = 1
+		if from < to {
+			stride[i] = max(1, s.expected(contig, to-from)/per)
+		}
+	}
 	taken := make([]int, sampleSlices)
 	var out []*Alignment
 	seen := 0
 	s.each(contig, start, end, func(rec *sam.Record) bool {
 		seen++
 		slice := clamp((rec.Pos-start)/width, 0, sampleSlices-1)
-		if taken[slice] >= per {
+		seenIn[slice]++
+		if taken[slice] >= per || seenIn[slice]%stride[slice] != 0 {
 			return true
 		}
 		a := expand(rec, ref, filter.SoftClips, detail)

@@ -173,6 +173,90 @@ func TestDenseContigCheckpoints(t *testing.T) {
 		sketch.Round(time.Microsecond), len(got), read.Round(time.Microsecond))
 }
 
+// TestDenseContigUsesTheSketchForAThinSample checks that a screen holding far
+// more reads than the cap shows the sketch instead of drawing an unrepresentative
+// sample, that the filter line says how many were sampled, and that a pan out
+// there costs a profile lookup rather than a BAM scan.
+func TestDenseContigUsesTheSketchForAThinSample(t *testing.T) {
+	var dense screenCase
+	for _, c := range screenCases {
+		if c.sketch {
+			dense = c
+		}
+	}
+	m := screenModel(t, dense)
+	if !m.showReads() || !m.truncated {
+		t.Fatalf("the base-level view shows %d reads, sampled %v, want a sample", len(m.reads), m.truncated)
+	}
+	baseReads := m.readsSeen
+	summary := strings.Join(m.filterSummary(), " ")
+	want := fmt.Sprintf("Visualizing %s sampled reads of %s total in this region",
+		comma(len(m.reads)), comma(baseReads))
+	if !strings.Contains(summary, want) {
+		t.Fatalf("the filter line says %q, want %q", summary, want)
+	}
+
+	m.view.bpp = 10 // a screen now holds hundreds of thousands of reads
+	m.held = window{}
+	m.reload()
+	if m.showReads() || m.covPeak == 0 {
+		t.Fatalf("a screen of %s reads still draws a pileup instead of the sketch", comma(baseReads))
+	}
+
+	begin := time.Now()
+	m.pan(1000)
+	took := time.Since(begin)
+	t.Logf("dense sketch: a base screen holds %s reads, pan at 10 bases per column %v",
+		comma(baseReads), took.Round(time.Microsecond))
+	if took > 50*time.Millisecond {
+		t.Fatalf("a pan in the sketch took %v", took)
+	}
+}
+
+// TestDenseSampledViewFillsTheScreen checks that a sample is spread through each
+// slice rather than bunched at its left edge. The first rows of a wide pileup
+// then cover the whole width, so it turns into the sketch without a seam.
+func TestDenseSampledViewFillsTheScreen(t *testing.T) {
+	var dense screenCase
+	for _, c := range screenCases {
+		if c.sketch {
+			dense = c
+		}
+	}
+	m := screenModel(t, dense)
+	m.view = viewState{m.view.start, 5}
+	m.held = window{}
+	begin := time.Now()
+	m.reload()
+	loaded := time.Since(begin)
+	if !m.showReads() || m.readsSeen <= len(m.reads) {
+		t.Fatalf("the wide view has %d of %d reads and is not sampled", len(m.reads), m.readsSeen)
+	}
+
+	m.View()
+	l := m.layout()
+	covered := make([]bool, l.columns)
+	for row := l.pileupTop; row < min(l.pileupTop+30, l.pileupTop+l.pileupRows); row++ {
+		for col := 0; col < l.columns; col++ {
+			covered[col] = covered[col] || m.frame[row][gutterWidth+col].r != ' '
+		}
+	}
+	shown := 0
+	for _, ok := range covered {
+		if ok {
+			shown++
+		}
+	}
+	t.Logf("dense sample: %d of %d reads at 5 bases per column, load %v, %d of %d columns in the first rows",
+		len(m.reads), m.readsSeen, loaded.Round(time.Microsecond), shown, l.columns)
+	if shown < l.columns*9/10 {
+		t.Fatalf("the first rows cover %d of %d columns, so the sample bunches at the slice edges", shown, l.columns)
+	}
+	if loaded > 500*time.Millisecond {
+		t.Fatalf("loading a sampled screen took %v", loaded)
+	}
+}
+
 func TestPanningStaysSmooth(t *testing.T) {
 	m := ready(t, "multi_contig_uneven")
 	start := time.Now()
@@ -413,6 +497,30 @@ func BenchmarkFrame(b *testing.B) {
 				m.View()
 			}
 		})
+	}
+}
+
+// The dense mitochondrial case is the one that stresses pan and zoom: a pan
+// reuses rows, while the sketch takes over once a screen holds far more reads
+// than the sample cap.
+func BenchmarkDensePan(b *testing.B) {
+	m := screenModel(b, screenCases[len(screenCases)-1])
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.pan(10)
+		m.View()
+	}
+}
+
+func BenchmarkDenseSketchPan(b *testing.B) {
+	m := screenModel(b, screenCases[len(screenCases)-1])
+	m.view.bpp = 10
+	m.held = window{}
+	m.reload()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.pan(100)
+		m.View()
 	}
 }
 

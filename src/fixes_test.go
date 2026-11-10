@@ -288,7 +288,7 @@ func TestOnlyTheReadsOnScreenLookForConsensusDifferences(t *testing.T) {
 	}
 }
 
-func TestZoomedOutShowsAnUpsideDownCoverageHistogram(t *testing.T) {
+func TestZoomedOutShowsAPileupField(t *testing.T) {
 	m := auditOpen(t, "testdata/vcholerae.bam", "", "")
 	m.width, m.height = 150, 44
 	c := &m.src.Contigs[m.contig]
@@ -302,7 +302,7 @@ func TestZoomedOutShowsAnUpsideDownCoverageHistogram(t *testing.T) {
 	start := time.Now()
 	frame := m.View()
 	took := time.Since(start)
-	t.Logf("upside-down coverage sketch: %d columns, peak depth %d, drawn in %s",
+	t.Logf("pileup sketch: %d columns, peak depth %d, drawn in %s",
 		len(m.cov), m.covPeak, took.Round(time.Microsecond))
 	if took > 50*time.Millisecond {
 		t.Errorf("drawing the coverage sketch took %v", took)
@@ -310,33 +310,43 @@ func TestZoomedOutShowsAnUpsideDownCoverageHistogram(t *testing.T) {
 	if !strings.Contains(frame, "Scroll in or press + to zoom to reads") {
 		t.Fatal("the zoomed-out view does not say how to reach the reads")
 	}
-	if strings.Contains(frame, "Zoomed out: the depth track covers the whole contig") {
-		t.Fatal("the old zoomed-out message is still shown")
-	}
 
 	l := m.layout()
-	rows := max(1, l.pileupRows*3/4)
+	rows := max(1, l.pileupRows-1)
 	for col := 0; col < l.columns && col < len(m.cov); col++ {
-		height := (m.cov[col]*rows*8 + m.covPeak/2) / m.covPeak
-		want := (height + 7) / 8
+		want := min(rows, (m.cov[col]*rows+m.covPeak/2)/m.covPeak)
 		drawn := 0
 		for row := 0; row < l.pileupRows; row++ {
-			r := m.frame[l.pileupTop+row][gutterWidth+col].r
-			if strings.ContainsRune("░▒▓", r) {
+			cell := m.frame[l.pileupTop+row][gutterWidth+col]
+			switch cell.r {
+			case '─', '▶', '◀':
 				drawn++
-				if row >= rows {
-					t.Fatalf("column %d draws below the 75%% limit at row %d", col, row)
+				if cell.s.fg != quietGrey {
+					t.Fatalf("the sketch at %d,%d is colored %q instead of grey", col, row, cell.s.fg)
 				}
+			case '░', '▒', '▓':
+				t.Fatalf("the old coverage shade %q is still drawn", cell.r)
 			}
 		}
 		if drawn != want {
 			t.Fatalf("column %d has depth %d and draws %d rows, want %d", col, m.cov[col], drawn, want)
 		}
-		if want > 0 {
-			if r := m.frame[l.pileupTop][gutterWidth+col].r; !strings.ContainsRune("░▒▓", r) {
-				t.Fatalf("column %d does not hang from the top of the read area", col)
-			}
-		}
+	}
+
+	// A few bases per column: the field breaks into read-length runs and
+	// arrowheads, the same shapes a closer zoom draws, rather than a solid bar.
+	c.Reads = 1 << 30 // make the pileup too dense to draw, so the sketch shows
+	m.view = viewState{0, 50}
+	m.reload()
+	if m.showReads() {
+		t.Fatal("the dense view still draws reads")
+	}
+	m.View()
+	if r := m.frame[l.pileupTop][gutterWidth]; r.r != ' ' {
+		t.Fatalf("the field starts with %q, want the gap between two reads", r.r)
+	}
+	if r := m.frame[l.pileupTop][gutterWidth+2]; r.r != '▶' {
+		t.Fatalf("the first forward read ends with %q, want an arrow", r.r)
 	}
 
 	path := filepath.Join(t.TempDir(), "sketch.svg")
@@ -346,9 +356,6 @@ func TestZoomedOutShowsAnUpsideDownCoverageHistogram(t *testing.T) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "fill-opacity") {
-		t.Fatal("the exported sketch has no soft shades")
 	}
 	for _, r := range "░▒▓" {
 		if strings.ContainsRune(string(data), r) {

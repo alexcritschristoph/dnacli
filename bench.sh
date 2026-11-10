@@ -10,7 +10,7 @@
 # repository, so this is a script for a checkout that has them. They include
 # testdata/dense_mito.bam, 4.1 million reads on one 16.7 kb mitochondrial
 # contig. BenchmarkFootprint reports its retained heap and checkpoint bytes;
-# the Load/ColdLoad/Frame benchmarks include its screen latency.
+# the Load/ColdLoad/Frame/DensePan benchmarks include its screen latency.
 set -euo pipefail
 cd "$(dirname "$0")"
 

@@ -119,7 +119,9 @@ func TestPanningKeepsAVisibleReadOnItsRow(t *testing.T) {
 		t.Skip("no read fully inside the view")
 	}
 	row, top := chosen.Row, chosen.Row-m.rowOffset
+	begin := time.Now()
 	m.pan(step)
+	t.Logf("a %d base pan with %d reads took %v", step, len(m.reads), time.Since(begin).Round(time.Microsecond))
 	for _, a := range m.reads {
 		if a.Name != chosen.Name {
 			continue
@@ -1631,8 +1633,11 @@ func TestSampledRegionsLoadEachReadOnce(t *testing.T) {
 	m.view = viewState{0, 20}
 	m.reload()
 	whole := len(m.reads)
-	m.src.Contigs[0].Reads = 1 << 30 // pretend the contig is enormous so the region is sampled
-	m.held = window{}                // ask the file again, as a jump would
+	// Pretend the region holds a little more than the cap, so it is sampled
+	// with a stride of one and every real read should still be kept.
+	c := &m.src.Contigs[0]
+	c.Reads = int64(6 * maxAlignments / 5 * c.Length / m.span())
+	m.held = window{} // ask the file again, as a jump would
 	m.reload()
 	seen := map[string]bool{}
 	for _, a := range m.reads {

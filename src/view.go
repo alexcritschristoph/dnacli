@@ -660,27 +660,39 @@ func (m *model) drawPileup(g grid, l layout) {
 	if !m.showReads() && m.contigs()[m.contig].Profile == nil {
 		g.draw(l.pileupTop+1, gutterWidth+2, "Measuring coverage across the contig…", cellStyle{fg: colorMuted, bg: colorBackdrop})
 	} else if !m.showReads() {
-		// The sketch hangs from the top like a pileup turned upside down: each
-		// column reaches as far down as its depth, drawn in soft shades whose
-		// color brightens with coverage.
-		rows := max(1, l.pileupRows*3/4)
+		// The sketch is an illusion of the reads a closer zoom would draw: one
+		// row per read, as deep as the local coverage, with a break and an
+		// arrow where one read ends and the next begins. The breaks follow the
+		// reference position, so the field stays put when the view pans, and the
+		// same grey and the same glyphs as a read make the change of scale
+		// seamless.
+		rows := max(1, l.pileupRows-1)
 		peak := max(m.covPeak, 1)
-		for col, n := range m.cov {
+		readCols := max(1, m.readLength/max(1, m.view.bpp))
+		style := cellStyle{fg: quietGrey, bg: colorBackdrop}
+		for col, depth := range m.cov {
 			if col >= l.columns {
 				break
 			}
-			height := (n*rows*8 + peak/2) / peak // eighths of a row
-			style := cellStyle{fg: mix("#22303c", "#6b93ad", float64(n)/float64(peak)), bg: colorBackdrop}
-			for row := 0; row < rows && height > 0; row++ {
-				r := '▒'
-				if height <= 8 { // the last cell is denser, so the contour stays crisp
-					r = '▓'
-				}
-				if row == 0 {
-					r = '░'
+			height := min(rows, (depth*rows+peak/2)/peak)
+			at := m.cols[col].pos / max(1, m.view.bpp)
+			for row := 0; row < height; row++ {
+				r := '─'
+				if readCols >= 3 {
+					shift := at + row*7 + row*row*3
+					phase := shift % readCols
+					if phase == 0 {
+						continue // the gap between two reads
+					}
+					reverse := (shift/readCols+row)%2 == 1
+					switch {
+					case !reverse && phase == readCols-1:
+						r = '▶' // a forward read ends here
+					case reverse && phase == 1:
+						r = '◀' // a reverse read starts here
+					}
 				}
 				g.set(l.pileupTop+row, gutterWidth+col, r, style)
-				height -= 8
 			}
 		}
 		g.draw(l.pileupTop+l.pileupRows-1, gutterWidth+2, "Scroll in or press + to zoom to reads", cellStyle{fg: colorDim, bg: colorBackdrop})
@@ -819,12 +831,12 @@ func (m *model) filterSummary() []string {
 	switch {
 	case !m.showReads():
 		drawn = "Zoom in to view reads."
+	case m.truncated && m.readsSeen > 0:
+		drawn = fmt.Sprintf("Visualizing %s sampled reads of %s total in this region",
+			comma(len(m.reads)), comma(m.readsSeen))
 	case m.filter != defaultFilter() && m.readsSeen > 0: // once a filter is on, say what it left out
 		drawn = fmt.Sprintf("Visualizing %d of %d (%d%%) reads",
 			len(m.reads), m.readsSeen, 100*len(m.reads)/m.readsSeen)
-	}
-	if m.truncated {
-		drawn += ", a sample of this region"
 	}
 	fields := []string{m.coloringSummary(), drawn,
 		fmt.Sprintf("Mapping quality ≥ %d", m.filter.MinMapQ), "Mismatches " + mismatchLimit(m.filter)}

@@ -1002,17 +1002,35 @@ func (m *model) reload() {
 	// The consensus of the reads is a per-base idea too, so it waits for a
 	// closer zoom rather than costing a pass over every base here.
 	detail := span <= baseDetailSpan
-	var oldRows map[string]int
-	if m.held.src == m.src && m.held.contig == m.contig && m.shownSpan == span && m.shownView.start != m.view.start {
-		oldRows = make(map[string]int, len(m.reads))
+	// Rows carry over from the screen being replaced. Only the reads that were
+	// on it may keep a row: one that comes back after a detour is placed afresh,
+	// so it cannot land on a row another read has taken meanwhile.
+	for _, a := range m.held.reads {
+		a.rowSeen = false
+	}
+	if m.shownSpan == span {
 		for _, a := range m.reads {
-			oldRows[a.Name] = a.Row
+			a.rowSeen = true
 		}
 	}
 	m.reads, m.readsSeen, m.truncated = m.windowReads(m.contig, m.view.start, end, detail)
 	m.measureReads()
 	m.buildColumns(l.columns)
-	m.rowCount = packRows(m.reads, max(1, m.view.bpp), span, oldRows)
+	reused := len(m.reads) > 0
+	for _, a := range m.reads {
+		if !a.rowSeen {
+			reused = false
+			break
+		}
+	}
+	if reused {
+		m.rowCount = 0
+		for _, a := range m.reads {
+			m.rowCount = max(m.rowCount, a.Row+1)
+		}
+	} else {
+		m.rowCount = packRows(m.reads, max(1, m.view.bpp), span)
+	}
 	if detail {
 		counts, depth := m.countBases(m.reads, m.view.start, end)
 		m.consensus = consensusBases(counts)
@@ -1200,13 +1218,21 @@ func (m *model) impactAt(pos int, refBase, alt byte) Impact {
 // for a fraction of the work.
 const readZoomLimit = 400
 
+// readSketchLimit is how many reads a screen may hold before a pileup becomes
+// too thin a sample to be worth drawing. The depth sketch then says more.
+const readSketchLimit = 200000
+
 // baseDetailSpan is how many reference bases may be on screen before the view
 // stops keeping a base for every position. Beyond it no single base is drawn,
 // so only the differences are worth keeping.
 const baseDetailSpan = 10000
 
 func (m *model) showReads() bool {
-	return m.view.bpp <= min(max(m.readLength, 1), readZoomLimit)
+	if m.view.bpp > min(max(m.readLength, 1), readZoomLimit) {
+		return false
+	}
+	c := m.contigs()[m.contig]
+	return c.Length > 0 && int64(c.Reads)*int64(m.span())/int64(c.Length) <= readSketchLimit
 }
 
 func (m *model) measureReads() {

@@ -782,10 +782,10 @@ func TestAuditPairRows(t *testing.T) {
 		return a
 	}
 	a, b := mk("pair", 0, 100, true), mk("pair", 1000, 1100, true)
-	rows := packRows([]*Alignment{a, b}, 1, 120, nil)
+	rows := packRows([]*Alignment{a, b}, 1, 120)
 	t.Logf("far-apart mates: rows=%d a.Row=%d b.Row=%d", rows, a.Row, b.Row)
 	c, d := mk("close", 0, 100, true), mk("close", 120, 220, true)
-	rows = packRows([]*Alignment{c, d}, 1, 300, nil)
+	rows = packRows([]*Alignment{c, d}, 1, 300)
 	t.Logf("close mates: rows=%d a.Row=%d b.Row=%d (same row keeps a pair together)", rows, c.Row, d.Row)
 	if c.Row != d.Row {
 		t.Logf("FINDING: close mates were split onto different rows")
