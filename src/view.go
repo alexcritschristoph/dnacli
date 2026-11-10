@@ -166,9 +166,14 @@ func (g grid) fill(row, from, to int, r rune, s cellStyle) {
 	}
 }
 
-// loadingSpin is the small mark that turns under the depth while a screen is
-// being built.
-var loadingSpin = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+// loadingRing is the dotted rectangle under the depth while a screen is built.
+// The bright dot walks around its edge.
+const loadingWidth, loadingHeight = (gutterWidth - 2) * 9 / 10, 2
+
+var loadingRing = [loadingWidth * loadingHeight][2]int{
+	{0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}, {0, 5}, {0, 6}, {0, 7}, {0, 8},
+	{1, 8}, {1, 7}, {1, 6}, {1, 5}, {1, 4}, {1, 3}, {1, 2}, {1, 1}, {1, 0},
+}
 
 func (m *model) View() string {
 	if m.width < 40 || m.height < 18 {
@@ -180,19 +185,30 @@ func (m *model) View() string {
 		if len(m.frame[0]) != m.width || len(m.frame) != m.height {
 			return m.frame.String() // the window changed size mid-load
 		}
-		// The mark turns in the middle of the gutter just under the depth
-		// label, where it covers no read and cannot be mistaken for one.
-		row := m.layout().pileupTop
-		label := m.depthLabel()
-		col := gutterWidth - 2 - len(label) + len(label)/2
-		if row >= 0 && row < len(m.frame) && col >= 0 && col < len(m.frame[row]) {
-			saved := m.frame[row][col]
-			m.frame[row][col] = cell{loadingSpin[m.spin%len(loadingSpin)], cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}}
-			frame := m.frame.String()
-			m.frame[row][col] = saved
-			return frame
+		// The dotted rectangle sits in the gutter just under the depth label,
+		// where it covers no read and cannot be mistaken for one.
+		row, start := m.layout().pileupTop, gutterWidth-2-loadingWidth
+		var saved [loadingHeight][loadingWidth]cell
+		for i, at := range loadingRing {
+			r, style := '•', cellStyle{fg: colorMuted, bg: colorBackdrop}
+			if i == m.spin%len(loadingRing) {
+				r, style = '●', cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}
+			}
+			rr, cc := row+at[0], start+at[1]
+			if rr < 0 || rr >= len(m.frame) || cc >= len(m.frame[rr]) {
+				continue
+			}
+			saved[at[0]][at[1]] = m.frame[rr][cc]
+			m.frame[rr][cc] = cell{r, style}
 		}
-		return m.frame.String()
+		frame := m.frame.String()
+		for _, at := range loadingRing {
+			rr, cc := row+at[0], start+at[1]
+			if rr >= 0 && rr < len(m.frame) && cc < len(m.frame[rr]) {
+				m.frame[rr][cc] = saved[at[0]][at[1]]
+			}
+		}
+		return frame
 	}
 	m.refreshBars()
 	l := m.layout()
