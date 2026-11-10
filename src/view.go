@@ -166,8 +166,8 @@ func (g grid) fill(row, from, to int, r rune, s cellStyle) {
 	}
 }
 
-// spinner is the little mark that turns while a screen is being built.
-var spinner = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+// loadingMark is the bar that sweeps under the depth while a screen is built.
+var loadingMark = []string{"█░░", "██░", "███", "░██", "░░█"}
 
 func (m *model) View() string {
 	if m.width < 40 || m.height < 18 {
@@ -176,14 +176,27 @@ func (m *model) View() string {
 	if m.loading && len(m.frame) > 0 {
 		// The frame still in the buffer is the last complete one, so the picture
 		// never goes blank while the next is built.
-		if len(m.frame[0]) != m.width {
+		if len(m.frame[0]) != m.width || len(m.frame) != m.height {
 			return m.frame.String() // the window changed size mid-load
 		}
-		row := m.frame[0]
-		saved := row[m.width-1]
-		row[m.width-1] = cell{spinner[m.spin%len(spinner)], cellStyle{fg: colorText, bg: colorPanel}}
+		// The mark sits in the empty gutter under the depth, where it covers no
+		// read and cannot be mistaken for one.
+		row := m.layout().pileupTop
+		mark := []rune(loadingMark[m.spin%len(loadingMark)])
+		var saved [3]cell
+		for col, r := range mark {
+			if row < 0 || row >= len(m.frame) || col >= len(m.frame[row]) {
+				continue
+			}
+			saved[col] = m.frame[row][col]
+			m.frame[row][col] = cell{r, cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}}
+		}
 		frame := m.frame.String()
-		row[m.width-1] = saved
+		for col := range mark {
+			if row >= 0 && row < len(m.frame) && col < len(m.frame[row]) {
+				m.frame[row][col] = saved[col]
+			}
+		}
 		return frame
 	}
 	m.refreshBars()
@@ -523,14 +536,14 @@ func (m *model) drawTracks(g grid, l layout) {
 	}
 
 	// coverage
-	g.draw(row, gutterWidth-2-len("depth"), "depth", label)
+	depth := "depth"
 	if m.covPeak > 0 {
-		depth := shorten(fmt.Sprintf("depth %d", m.covPeak), 9)
+		depth = "depth " + compactCount(m.covPeak)
 		if m.truncated {
 			depth = "sample"
 		}
-		g.draw(row, gutterWidth-2-len(depth), depth, label)
 	}
+	g.draw(row, gutterWidth-2-len(depth), depth, label)
 	blocks := []rune("▁▂▃▄▅▆▇█")
 	for col, n := range m.cov {
 		if col >= l.columns {
@@ -1044,4 +1057,27 @@ func comma(n int) string {
 		s = s[:i] + "," + s[i:]
 	}
 	return s
+}
+
+// compactCount writes a count in the four characters the gutter has room for,
+// so the depth label never has to be cut short.
+func compactCount(n int) string {
+	switch {
+	case n >= 999_500_000:
+		if n < 9_950_000_000 {
+			return fmt.Sprintf("%.1fG", float64(n)/1e9)
+		}
+		return fmt.Sprintf("%.0fG", float64(n)/1e9)
+	case n >= 999_500:
+		if n < 9_950_000 {
+			return fmt.Sprintf("%.1fM", float64(n)/1e6)
+		}
+		return fmt.Sprintf("%.0fM", float64(n)/1e6)
+	case n >= 1_000:
+		if n < 9_950 {
+			return fmt.Sprintf("%.1fk", float64(n)/1e3)
+		}
+		return fmt.Sprintf("%.0fk", float64(n)/1e3)
+	}
+	return fmt.Sprint(n)
 }

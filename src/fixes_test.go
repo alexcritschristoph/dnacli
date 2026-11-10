@@ -364,6 +364,33 @@ func TestZoomedOutShowsAPileupField(t *testing.T) {
 	}
 }
 
+func TestTheDepthLabelNeverOutgrowsTheGutter(t *testing.T) {
+	m := ready(t, "viral_variants")
+	m.width, m.height = 150, 30
+	m.cov, m.truncated = nil, false
+	for _, c := range []struct {
+		peak int
+		want string
+	}{
+		{989, "depth 989"},
+		{9_500, "depth 9.5k"},
+		{95_567, "depth 96k"},
+		{1_054_413, "depth 1.1M"},
+		{1_999_999_999, "depth 2.0G"},
+	} {
+		m.covPeak = c.peak
+		l := m.layout()
+		lines := strings.Split(plain(m.View()), "\n")
+		got := strings.TrimSpace(string([]rune(lines[l.pileupTop-1])[:gutterWidth]))
+		if got != c.want {
+			t.Fatalf("a peak depth of %d writes %q, want %q", c.peak, got, c.want)
+		}
+		if len([]rune(got)) > gutterWidth-2 {
+			t.Fatalf("%q needs %d columns, the gutter has %d", got, len([]rune(got)), gutterWidth-2)
+		}
+	}
+}
+
 func TestEmptyReadAreaSaysNoReadsPassingTheFilters(t *testing.T) {
 	m := ready(t, "viral_variants")
 	m.filter.MinMapQ = 1000
