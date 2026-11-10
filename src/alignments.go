@@ -127,10 +127,11 @@ type Filter struct {
 	HideUnpaired   bool
 	MinLength      int  // shortest read worth drawing
 	SoftClips      bool // draw the bases the aligner clipped off the ends
+	Insertions     bool // draw the bases a read inserts between reference bases
 }
 
 func defaultFilter() Filter {
-	return Filter{MaxMismatches: -1, HideSecondary: true, SoftClips: true}
+	return Filter{MaxMismatches: -1, HideSecondary: true, SoftClips: true, Insertions: true}
 }
 
 func (f Filter) keep(a *Alignment) bool {

@@ -161,6 +161,8 @@ var filterRows = []struct {
 		func(f *Filter, d int) { f.MinLength = along(lengthLadder, f.MinLength, d) }},
 	{"Soft-clipped bases", func(f Filter) string { return shown(f.SoftClips) },
 		func(f *Filter, _ int) { f.SoftClips = !f.SoftClips }},
+	{"Inserted bases", func(f Filter) string { return shown(f.Insertions) },
+		func(f *Filter, _ int) { f.Insertions = !f.Insertions }},
 }
 
 // lengthLadder is what the arrow keys walk through for the read length filter,

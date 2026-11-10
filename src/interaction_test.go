@@ -1029,6 +1029,62 @@ func TestInsertionsGetColumnsOfTheirOwn(t *testing.T) {
 	}
 }
 
+func TestInsertedBasesCanBeHidden(t *testing.T) {
+	m := ready(t, "supertest")
+	m.parseGoto("SUPER_A:1480-1530")
+	m.view.bpp = 1
+	m.reload()
+	at := 1496
+	if m.inserts[at] == 0 {
+		t.Fatalf("the insertion at %d has no columns", at+1)
+	}
+	name := ""
+	for _, a := range m.reads {
+		if a.Insertions[at] != "" {
+			name = a.Name
+			break
+		}
+	}
+	if name == "" {
+		t.Fatal("no read carries the insertion")
+	}
+	run(m, "filters insertions")
+	if m.filter.Insertions {
+		t.Fatal("the insertions filter stayed on")
+	}
+	if m.inserts[at] != 0 {
+		t.Fatalf("the hidden insertion still takes %d columns", m.inserts[at])
+	}
+	if m.column(at+1) != m.column(at)+1 {
+		t.Fatal("the bases after the hidden insertion do not line up")
+	}
+	if summary := strings.Join(m.filterSummary(), " "); !strings.Contains(summary, "Inserted bases hidden") {
+		t.Fatalf("the filter summary does not say insertions are hidden: %s", summary)
+	}
+	m.View()
+	var read *Alignment
+	for _, a := range m.reads {
+		if a.Name == name {
+			read = a
+			break
+		}
+	}
+	if read == nil || read.BaseAt(at+1) == 0 {
+		t.Skip("the read carrying the insertion is not on screen")
+	}
+	row := m.layout().pileupTop + read.Row - m.rowOffset
+	if row < m.layout().pileupTop || row >= m.layout().pileupTop+m.layout().pileupRows {
+		t.Skip("the read carrying the insertion is off screen")
+	}
+	if got, want := m.frame[row][gutterWidth+m.column(at)+1].r, rune(read.BaseAt(at+1)); got != want {
+		t.Fatalf("after hiding insertions the read shows %q after the site, want %q", got, want)
+	}
+	run(m, "filters insertions")
+	if !m.filter.Insertions || m.inserts[at] == 0 {
+		t.Fatal("turning insertions back on did not restore their columns")
+	}
+}
+
 func TestSoftClipsCanBeTurnedOff(t *testing.T) {
 	m := ready(t, "paired_reads")
 	if !m.filter.SoftClips {
@@ -1611,7 +1667,7 @@ func TestChoosingACommandListsWhatItTakes(t *testing.T) {
 	for _, r := range "filters " {
 		press(m, string(r))
 	}
-	if list := m.suggestions(); len(list) != 9 || list[0].label != "mapq 30" {
+	if list := m.suggestions(); len(list) != 10 || list[0].label != "mapq 30" {
 		t.Fatalf("filters listed %v", list)
 	}
 	press(m, "enter") // the first filter, which wants a number

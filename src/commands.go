@@ -97,6 +97,7 @@ func filterSuggestions(typed string) []suggestion {
 		{"duplicates", "show or hide duplicates", "filters duplicates"},
 		{"pairs", "show or hide reads not in a proper pair", "filters pairs"},
 		{"clips", "show or hide soft-clipped bases", "filters clips"},
+		{"insertions", "show or hide inserted bases", "filters insertions"},
 		{"reset", "reset all filters", "filters reset"},
 	}
 	var out []suggestion
@@ -285,6 +286,8 @@ func (m *model) runFilter(arg string) {
 		m.filter.HideUnpaired = !m.filter.HideUnpaired
 	case "clips":
 		m.filter.SoftClips = !m.filter.SoftClips
+	case "insertions":
+		m.filter.Insertions = !m.filter.Insertions
 	case "reset":
 		m.filter = defaultFilter()
 	default:

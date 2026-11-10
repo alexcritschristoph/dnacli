@@ -74,10 +74,12 @@ func (m *model) buildColumns(columns int) {
 		return
 	}
 	m.inserts = map[int]int{}
-	for _, a := range m.reads {
-		for pos, seq := range a.Insertions {
-			if pos >= m.view.start && pos < m.view.start+columns {
-				m.inserts[pos] = min(max(m.inserts[pos], len(seq)), maxInsertColumns)
+	if m.filter.Insertions {
+		for _, a := range m.reads {
+			for pos, seq := range a.Insertions {
+				if pos >= m.view.start && pos < m.view.start+columns {
+					m.inserts[pos] = min(max(m.inserts[pos], len(seq)), maxInsertColumns)
+				}
 			}
 		}
 	}
@@ -835,6 +837,9 @@ func (m *model) filterSummary() []string {
 	if m.filter.MinMeanQual > 0 {
 		fields = append(fields, fmt.Sprintf("Average quality ≥ %d", m.filter.MinMeanQual))
 	}
+	if !m.filter.Insertions {
+		fields = append(fields, "Inserted bases hidden")
+	}
 	return fields
 }
 
@@ -935,7 +940,7 @@ func (m *model) changeIn(a *Alignment, pos int) change {
 	refBase, base := m.ref.Base(contig, pos), a.BaseAt(pos)
 	switch {
 	case refBase == 0: // without a reference there is nothing to compare against
-	case a.Insertions[pos] != "":
+	case m.filter.Insertions && a.Insertions[pos] != "":
 		return change{pos, pos + 1, string(refBase) + a.Insertions[pos]}
 	case base == '-':
 		from, to := a.deletion(pos)
@@ -980,9 +985,11 @@ func (m *model) readSummary(a *Alignment) []string {
 		fmt.Sprintf("average base quality %d", a.MeanQual),
 		mismatches,
 	}
-	for pos, seq := range a.Insertions {
-		parts = append(parts, fmt.Sprintf("insertion %s at %s", seq, comma(pos+1)))
-		break
+	if m.filter.Insertions {
+		for pos, seq := range a.Insertions {
+			parts = append(parts, fmt.Sprintf("insertion %s at %s", seq, comma(pos+1)))
+			break
+		}
 	}
 	switch {
 	case !a.Paired():
