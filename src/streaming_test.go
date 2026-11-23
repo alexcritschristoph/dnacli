@@ -140,13 +140,11 @@ func TestStreamedSketchPublishesOneContigAtATime(t *testing.T) {
 
 	m := newModel(src, nil, "", nil)
 	m.width, m.height = 150, 44
-	own, err := openAlignments(path, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	own.reader.Omit(bam.AllVariableLengthData)
 	begin := time.Now()
-	msg := sketchStep(src, own, own.newSketch())
+	msg, ok := sketchCoverageAt(src, 0)().(profileMsg)
+	if !ok {
+		t.Fatal("the streamed sketch returned no message")
+	}
 	first := time.Since(begin)
 	_, next := m.Update(msg)
 	if next == nil {

@@ -173,17 +173,22 @@ func (m *model) Init() tea.Cmd {
 // file once, in the background, so that the screen keeps its own handle and a
 // file of a thousand contigs is not opened a thousand times.
 func sketchCoverage(src *Source) tea.Cmd {
+	return sketchCoverageAt(src, largeAlignment)
+}
+
+// sketchCoverageAt is sketchCoverage with an explicit size cut, so a test can
+// force a small file down the streaming path.
+func sketchCoverageAt(src *Source, large int64) tea.Cmd {
 	return func() tea.Msg {
 		// A file that was small enough to hold in memory is already decoded;
 		// measure it there rather than opening a second copy.
 		if src.index == nil && src.memory != nil {
 			return profileMsg{source: src, profiles: src.memoryProfiles()}
 		}
-		own, err := OpenAlignments(src.Path)
+		own, err := openAlignments(src.Path, large)
 		if err != nil {
 			return profileMsg{source: src} // nothing more will come, so stop waiting
 		}
-		defer own.Close()
 		if own.reader != nil {
 			own.reader.Omit(bam.AllVariableLengthData) // a sketch needs positions, not bases
 		}
