@@ -166,10 +166,10 @@ func (g grid) fill(row, from, to int, r rune, s cellStyle) {
 	}
 }
 
-// spinner is the little mark that turns while a screen is being built. The
-// eight-dot patterns fill the whole cell; six-dot ones leave its bottom row
+// spinner is the little mark that turns while a screen is being built. Its
+// six-dot patterns use the whole cell; fewer dots would leave its bottom row
 // empty in most terminal fonts.
-var spinner = []rune("⣾⣽⣻⢿⡿⣟⣯⣷")
+var spinner = []rune("⣶⣧⣏⡟⡻⢻⣹⣼")
 
 // loadingNote is what the pileup says while it waits for the coverage sketch.
 const loadingNote = "Loading read and coverage data...."

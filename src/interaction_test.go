@@ -236,7 +236,17 @@ func TestAPanDoesNotWaitForTheFile(t *testing.T) {
 
 func TestTheTurningMarkFillsItsCell(t *testing.T) {
 	for _, r := range spinner {
-		if r-'\u2800'&0xC0 == 0 {
+		dots := r - '\u2800'
+		lit := 0
+		for d := rune(1); d < 0x100; d <<= 1 {
+			if dots&d != 0 {
+				lit++
+			}
+		}
+		if lit != 6 {
+			t.Fatalf("%q has %d lit dots, want 6", r, lit)
+		}
+		if dots&0xC0 == 0 {
 			t.Fatalf("%q leaves the bottom row of its cell empty", r)
 		}
 	}
