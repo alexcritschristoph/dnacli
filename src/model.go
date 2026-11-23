@@ -52,6 +52,7 @@ type model struct {
 	stale         bool      // the model changed while a screen was being built
 	quiet         bool      // pan and zoom change the view without reading the file
 	spin          int       // which frame of the loading mark is shown
+	spinning      bool      // a frame of the loading mark is already booked
 
 	reads      []*Alignment
 	held       window       // the reads kept around the view, so a pan only asks for the new strip
@@ -262,15 +263,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		pan, zoom, anchor, scheduled := m.movePan, m.moveZoom, m.moveAnchor, m.moveScheduled
 		offset, message, messageUntil := m.rowOffset, m.message, m.messageUntil
 		flash, flashUntil := m.flash, m.flashUntil
+		spin, spinning := m.spin, m.spinning
 		*m = *msg.model
 		m.movePan, m.moveZoom, m.moveAnchor, m.moveScheduled = pan, zoom, anchor, scheduled
 		m.rowOffset = clamp(offset, 0, max(0, m.rowCount-m.layout().pileupRows))
 		m.message, m.messageUntil, m.flash, m.flashUntil = message, messageUntil, flash, flashUntil
+		m.spin, m.spinning = spin, spinning
 		if m.movePan != 0 || m.moveZoom != 0 { // keys arrived while the screen was built
 			return m, tea.Tick(movePause, func(time.Time) tea.Msg { return moveMsg{} })
 		}
 		return m, nil
 	case spinMsg:
+		m.spinning = false
 		if m.loading || m.sketching() {
 			m.spin++
 			return m, m.spinTick()
@@ -522,7 +526,14 @@ type loadedMsg struct {
 // spinMsg asks for the next frame of the loading mark.
 type spinMsg struct{}
 
+// spinTick books the next frame of the loading mark, unless one is already
+// booked. Pan and zoom ask for a tick too, and two clocks would turn the mark
+// at twice the speed.
 func (m *model) spinTick() tea.Cmd {
+	if m.spinning {
+		return nil
+	}
+	m.spinning = true
 	return tea.Tick(90*time.Millisecond, func(time.Time) tea.Msg { return spinMsg{} })
 }
 

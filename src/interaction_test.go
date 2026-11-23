@@ -208,7 +208,7 @@ func TestAPanDoesNotWaitForTheFile(t *testing.T) {
 		t.Fatal("the frame on screen has no loading mark")
 	}
 	line := []rune(strings.Split(frame, "\n")[0])
-	want := m.tabHits[len(m.tabHits)-1].to + 2
+	want := m.tabHits[len(m.tabHits)-1].to + 1
 	if want >= len(line) || line[want] != spinner[m.spin] {
 		t.Fatalf("the loading mark is not just past the rightmost tab at column %d", want)
 	}
@@ -231,6 +231,64 @@ func TestAPanDoesNotWaitForTheFile(t *testing.T) {
 	}
 	if m.view.start != start+10*m.view.bpp {
 		t.Fatalf("the pan landed at %d, want %d", m.view.start, start+10*m.view.bpp)
+	}
+}
+
+func TestTheTurningMarkFillsItsCell(t *testing.T) {
+	for _, r := range spinner {
+		if r-'\u2800'&0xC0 == 0 {
+			t.Fatalf("%q leaves the bottom row of its cell empty", r)
+		}
+	}
+}
+
+func TestTheTurningMarkKeepsOneBeat(t *testing.T) {
+	m := ready(t, "viral_variants")
+	m.src.sketched = false // keep the mark turning
+	if m.spinTick() == nil {
+		t.Fatal("the first frame was not booked")
+	}
+	if m.spinTick() != nil {
+		t.Fatal("a second clock was booked while the first was still running")
+	}
+	begin := time.Now()
+	_, cmd := m.Update(spinMsg{})
+	took := time.Since(begin)
+	if cmd == nil {
+		t.Fatal("the mark stopped after one frame")
+	}
+	if m.spinTick() != nil {
+		t.Fatal("the frame that just came back booked a second clock")
+	}
+	t.Logf("answered one frame and booked the next in %s", took.Round(time.Microsecond))
+}
+
+func TestTheTurningMarkKeepsItsFrameAcrossAnAsyncPan(t *testing.T) {
+	m := ready(t, "viral_variants")
+	m.async = true
+	m.view = viewState{1000, 5}
+	m.reload()
+	m.View()
+	m.spinTick() // the clock the program starts with
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	cmd := m.showMove()
+	if cmd == nil {
+		t.Fatal("the pan started no screen")
+	}
+	before := m.spin
+	if _, next := m.Update(spinMsg{}); next == nil {
+		t.Fatal("the mark stopped during the load")
+	}
+	loaded, ok := cmd().(loadedMsg)
+	if !ok {
+		t.Fatalf("the pan returned %T", cmd())
+	}
+	m.Update(loaded)
+	if m.spin != before+1 {
+		t.Fatalf("the mark jumped from frame %d to %d", before+1, m.spin)
+	}
+	if m.spinTick() != nil {
+		t.Fatal("the merge booked a second clock")
 	}
 }
 
@@ -311,11 +369,14 @@ func TestZoomingIsNotDroppedWhileScreensLoad(t *testing.T) {
 		t.Fatal("the second zoom was dropped while the screen loaded")
 	}
 	_, cmd = m.Update(cmd())
-	batch, ok = cmd().(tea.BatchMsg)
-	if !ok {
-		t.Fatal("the second zoom did not start a screen")
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		msg = batch[0]() // the screen, beside the tick of the loading mark
 	}
-	m.Update(batch[0]())
+	if _, ok := msg.(loadedMsg); !ok {
+		t.Fatalf("the second zoom did not start a screen: %T", msg)
+	}
+	m.Update(msg)
 	if m.view.bpp != 50 {
 		t.Fatalf("the second zoom landed at %d bases per column, want 50", m.view.bpp)
 	}
