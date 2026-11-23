@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -61,6 +63,26 @@ func readInputs(args []string) (inputs, error) {
 	return in, nil
 }
 
+// confirmLargeUnindexed warns before a large unindexed file is opened. It
+// returns false when the user chooses to exit.
+func confirmLargeUnindexed(path string, in *bufio.Reader, out io.Writer) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() <= largeAlignment {
+		return true
+	}
+	if readIndex(path) != nil {
+		return true
+	}
+	fmt.Fprintln(out, "Warning: you are opening a large unindexed SAM/BAM, which will be very slow. I recommend indexing the BAM first.")
+	fmt.Fprint(out, "[c]ontinue  [e]xit: ")
+	line, _ := in.ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "c", "continue", "y", "yes":
+		return true
+	}
+	return false
+}
+
 func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage) }
@@ -77,6 +99,12 @@ func main() {
 	if len(in.alignments) == 0 {
 		flag.Usage()
 		os.Exit(1)
+	}
+	input := bufio.NewReader(os.Stdin)
+	for _, path := range in.alignments {
+		if !confirmLargeUnindexed(path, input, os.Stderr) {
+			return
+		}
 	}
 	alignPath, refPath, vcfPath := in.alignments[0], in.reference, in.variants
 	src, err := OpenAlignments(alignPath)

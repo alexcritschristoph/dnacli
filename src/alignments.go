@@ -174,20 +174,40 @@ type Source struct {
 	// A BAI only marks every 16 kb, which is the whole contig for mitochondrial
 	// and viral references.
 	checkpoints map[string][]checkpoint
+	// An unindexed BAM too large to hold in memory is read as a stream. Its
+	// sketch records checkpoints and read counts, and region reads start at the
+	// nearest checkpoint instead of decoding the file from the beginning.
+	streaming bool
+	size      int64
+	dataStart bgzf.Offset // just past the BAM header
 }
 
 const (
 	maxAlignments   = 5000 // the most reads one screen holds; a dense pileup is sampled down to this
 	sampleSlices    = 64   // how many places we sample when a region holds far more
 	checkpointEvery = 1024 // records between checkpoints in a dense contig
+
+	// largeAlignment is the size past which an unindexed file is streamed
+	// instead of held in memory, and the user is warned first.
+	largeAlignment = 256 << 20
 )
 
 func OpenAlignments(path string) (*Source, error) {
+	return openAlignments(path, largeAlignment)
+}
+
+// openAlignments opens a file, holding an unindexed one in memory only while
+// it is smaller than large. A larger unindexed BAM is streamed instead.
+func openAlignments(path string, large int64) (*Source, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	info, _ := f.Stat()
 	s := &Source{Path: path, file: f, refs: map[string]*sam.Reference{}, checkpoints: map[string][]checkpoint{}}
+	if info != nil {
+		s.size = info.Size()
+	}
 	var header *sam.Header
 	if strings.HasSuffix(strings.ToLower(path), ".sam") {
 		r, err := sam.NewReader(f)
@@ -208,8 +228,13 @@ func OpenAlignments(path string) (*Source, error) {
 		header, s.reader = r.Header(), r
 		s.index = readIndex(path)
 		if s.index == nil {
-			s.readAll(recordReader(r.Read))
-			s.reader = nil
+			if s.size > large {
+				s.streaming = true
+				s.dataStart = r.LastChunk().End
+			} else {
+				s.readAll(recordReader(r.Read))
+				s.reader = nil
+			}
 		}
 	}
 	for _, ref := range header.Refs() {
@@ -269,6 +294,12 @@ func (s *Source) Close() {
 	}
 }
 
+// readyFor says whether the file can answer a region query on one contig yet.
+// An indexed or in-memory file can; a streamed one waits for its sketch.
+func (s *Source) readyFor(contig string) bool {
+	return s.index != nil || s.memory != nil || len(s.checkpoints[contig]) > 0
+}
+
 // each walks every record overlapping a region, in coordinate order.
 func (s *Source) each(contig string, start, end int, visit func(*sam.Record) bool) error {
 	if s.memory != nil {
@@ -283,6 +314,9 @@ func (s *Source) each(contig string, start, end int, visit func(*sam.Record) boo
 			}
 		}
 		return nil
+	}
+	if s.streaming {
+		return s.eachStreamed(contig, start, end, visit)
 	}
 	ref := s.refs[contig]
 	if ref == nil {
@@ -302,6 +336,45 @@ func (s *Source) each(contig string, start, end int, visit func(*sam.Record) boo
 	defer it.Close()
 	for it.Next() {
 		rec := it.Record()
+		if rec.Pos >= end {
+			break
+		}
+		if rec.End() > start && !visit(rec) {
+			break
+		}
+	}
+	return it.Error()
+}
+
+// eachStreamed reads an unindexed region from the nearest checkpoint. The BAM
+// is coordinate sorted, so once the reader has moved past this contig there is
+// nothing left in the region.
+func (s *Source) eachStreamed(contig string, start, end int, visit func(*sam.Record) bool) error {
+	ref := s.refs[contig]
+	if ref == nil || s.reader == nil {
+		return nil
+	}
+	begin := s.dataStart
+	if at, ok := s.checkpointBefore(contig, start); ok {
+		begin = at.Offset
+	}
+	chunks := []bgzf.Chunk{{Begin: begin, End: bgzf.Offset{File: s.size}}}
+	it, err := bam.NewIterator(s.reader, chunks)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.Next() {
+		rec := it.Record()
+		if rec.Ref == nil {
+			continue
+		}
+		if rec.Ref.ID() > ref.ID() {
+			break
+		}
+		if rec.Ref.ID() < ref.ID() {
+			continue
+		}
 		if rec.Pos >= end {
 			break
 		}
@@ -595,6 +668,99 @@ func (s *Source) CoverageProfile(contig string, bins int) []float64 {
 		return true
 	})
 	return profile
+}
+
+// SketchAll reads a whole streamed BAM once and returns the coverage profile,
+// checkpoints and mapped-read count of every contig. It is the one-pass
+// counterpart to CoverageProfile for a file with no index.
+func (s *Source) SketchAll() (map[string][]float64, map[string][]checkpoint, map[string]int64) {
+	profiles := map[string][]float64{}
+	width := map[string]float64{}
+	for _, c := range s.Contigs {
+		if c.Length == 0 {
+			continue
+		}
+		bins := profileBinsFor(c.Length)
+		profiles[c.Name] = make([]float64, bins)
+		width[c.Name] = float64(c.Length) / float64(bins)
+	}
+	checkpoints := map[string][]checkpoint{}
+	counts := map[string]int64{}
+	type current struct {
+		name         string
+		profile      []float64
+		width        float64
+		maxEnd, seen int
+		count        int64
+		points       []checkpoint
+	}
+	var at *current
+	flush := func() {
+		if at != nil {
+			counts[at.name] = at.count
+			checkpoints[at.name] = at.points
+		}
+	}
+	for {
+		rec, err := s.reader.Read()
+		if err != nil {
+			break
+		}
+		if rec.Ref == nil || rec.Flags&sam.Unmapped != 0 {
+			continue
+		}
+		name := rec.Ref.Name()
+		if at == nil || at.name != name {
+			flush()
+			at = &current{name: name, profile: profiles[name], width: width[name]}
+		}
+		if at.profile == nil {
+			continue
+		}
+		if at.seen%checkpointEvery == 0 {
+			offset := s.reader.LastChunk().Begin
+			if offsetBefore(offset, s.dataStart) {
+				offset = s.dataStart
+			}
+			at.points = append(at.points, checkpoint{End: at.maxEnd, Offset: offset})
+		}
+		at.seen++
+		at.count++
+		at.maxEnd = max(at.maxEnd, rec.End())
+		addProfile(at.profile, at.width, rec)
+	}
+	flush()
+	return profiles, checkpoints, counts
+}
+
+// memoryProfiles measures the coverage of records already held in memory, so
+// an unindexed file does not have to be opened and decoded a second time.
+func (s *Source) memoryProfiles() map[string][]float64 {
+	profiles := map[string][]float64{}
+	for _, c := range s.Contigs {
+		recs := s.memory[c.Name]
+		if c.Length == 0 || len(recs) == 0 {
+			continue
+		}
+		bins := profileBinsFor(c.Length)
+		profile := make([]float64, bins)
+		width := float64(c.Length) / float64(bins)
+		for _, rec := range recs {
+			addProfile(profile, width, rec)
+		}
+		profiles[c.Name] = profile
+	}
+	return profiles
+}
+
+// addProfile adds one record's share of a bin to a coverage profile.
+func addProfile(profile []float64, width float64, rec *sam.Record) {
+	from, to := float64(rec.Pos), float64(rec.End())
+	first, last := int(from/width), int((to-1)/width)
+	for b := max(first, 0); b <= last && b < len(profile); b++ {
+		lo, hi := float64(b)*width, float64(b+1)*width
+		profile[b] += (math.Min(to, hi) - math.Max(from, lo)) / width
+	}
 }
 
 func (s *Source) contig(name string) *Contig {

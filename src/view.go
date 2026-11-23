@@ -823,6 +823,8 @@ func (m *model) drawBars(g grid, l layout) {
 func (m *model) filterSummary() []string {
 	drawn := fmt.Sprintf("Visualizing %d reads", len(m.reads))
 	switch {
+	case !m.src.readyFor(m.contigs()[m.contig].Name):
+		drawn = "Measuring coverage before reads."
 	case !m.showReads():
 		drawn = "Zoom in to view reads."
 	case m.truncated && m.readsSeen > 0:

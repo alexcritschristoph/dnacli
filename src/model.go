@@ -102,6 +102,7 @@ type profileMsg struct {
 	source      *Source
 	profiles    map[string][]float64
 	checkpoints map[string][]checkpoint
+	counts      map[string]int64 // mapped reads per contig, for a streamed file
 }
 
 // profileBins is the fewest coverage bins a contig gets. Longer contigs get
@@ -170,6 +171,11 @@ func (m *model) Init() tea.Cmd {
 // file of a thousand contigs is not opened a thousand times.
 func sketchCoverage(src *Source) tea.Cmd {
 	return func() tea.Msg {
+		// A file that was small enough to hold in memory is already decoded;
+		// measure it there rather than opening a second copy.
+		if src.index == nil && src.memory != nil {
+			return profileMsg{source: src, profiles: src.memoryProfiles()}
+		}
 		own, err := OpenAlignments(src.Path)
 		if err != nil {
 			return nil
@@ -178,13 +184,17 @@ func sketchCoverage(src *Source) tea.Cmd {
 		if own.reader != nil {
 			own.reader.Omit(bam.AllVariableLengthData) // a sketch needs positions, not bases
 		}
+		if own.streaming {
+			profiles, checkpoints, counts := own.SketchAll()
+			return profileMsg{source: src, profiles: profiles, checkpoints: checkpoints, counts: counts}
+		}
 		profiles := map[string][]float64{}
 		for _, c := range own.Contigs {
 			if c.Reads > 0 {
 				profiles[c.Name] = own.CoverageProfile(c.Name, profileBinsFor(c.Length))
 			}
 		}
-		return profileMsg{src, profiles, own.checkpoints}
+		return profileMsg{source: src, profiles: profiles, checkpoints: own.checkpoints}
 	}
 }
 
@@ -206,8 +216,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.checkpoints != nil {
 				s.checkpoints = msg.checkpoints
 			}
+			if msg.counts != nil {
+				for i, c := range s.Contigs {
+					s.Contigs[i].Reads = msg.counts[c.Name]
+				}
+			}
 		}
 		if msg.source == m.src {
+			if msg.counts != nil && m.contigs()[m.contig].Reads == 0 {
+				for i, c := range m.contigs() {
+					if c.Reads > 0 {
+						m.contig, m.contigIndex = i, i
+						break
+					}
+				}
+			}
 			m.reload()
 		}
 	case tea.MouseMsg:
@@ -1228,6 +1251,9 @@ const readSketchLimit = 200000
 const baseDetailSpan = 10000
 
 func (m *model) showReads() bool {
+	if !m.src.readyFor(m.contigs()[m.contig].Name) {
+		return false // an unindexed file is still building its checkpoints
+	}
 	if m.view.bpp > min(max(m.readLength, 1), readZoomLimit) {
 		return false
 	}
