@@ -166,9 +166,8 @@ func (g grid) fill(row, from, to int, r rune, s cellStyle) {
 	}
 }
 
-// loadingWidth is how many dots the loading mark spans: 90% of the gutter
-// column under the depth.
-const loadingWidth = (gutterWidth - 2) * 9 / 10
+// spinner is the little mark that turns while a screen is being built.
+var spinner = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
 func (m *model) View() string {
 	if m.width < 40 || m.height < 18 {
@@ -177,35 +176,14 @@ func (m *model) View() string {
 	if m.loading && len(m.frame) > 0 {
 		// The frame still in the buffer is the last complete one, so the picture
 		// never goes blank while the next is built.
-		if len(m.frame[0]) != m.width || len(m.frame) != m.height {
+		if len(m.frame[0]) != m.width {
 			return m.frame.String() // the window changed size mid-load
 		}
-		// A line of small dots in the gutter just under the depth label,
-		// where it covers no read and cannot be mistaken for one. The bright
-		// dot runs along the line and back.
-		row, start := m.layout().pileupTop, gutterWidth-2-loadingWidth
-		active := m.spin % (2*loadingWidth - 2)
-		if active >= loadingWidth {
-			active = 2*loadingWidth - 2 - active
-		}
-		var saved [loadingWidth]cell
-		for i := 0; i < loadingWidth; i++ {
-			if row < 0 || row >= len(m.frame) || start+i >= len(m.frame[row]) {
-				continue
-			}
-			style := cellStyle{fg: colorMuted, bg: colorBackdrop}
-			if i == active {
-				style = cellStyle{fg: colorAccent, bg: colorBackdrop, bold: true}
-			}
-			saved[i] = m.frame[row][start+i]
-			m.frame[row][start+i] = cell{'·', style}
-		}
+		row := m.frame[0]
+		saved := row[m.width-1]
+		row[m.width-1] = cell{spinner[m.spin%len(spinner)], cellStyle{fg: colorText, bg: colorPanel}}
 		frame := m.frame.String()
-		for i := 0; i < loadingWidth; i++ {
-			if row >= 0 && row < len(m.frame) && start+i < len(m.frame[row]) {
-				m.frame[row][start+i] = saved[i]
-			}
-		}
+		row[m.width-1] = saved
 		return frame
 	}
 	m.refreshBars()

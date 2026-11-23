@@ -201,14 +201,8 @@ func TestAPanDoesNotWaitForTheFile(t *testing.T) {
 	if !m.loading || m.view.start != start {
 		t.Fatalf("loading %v, start %d", m.loading, m.view.start)
 	}
-	lines := strings.Split(plain(m.View()), "\n")
-	l := m.layout()
-	left := gutterWidth - 2 - loadingWidth
-	line := []rune(lines[l.pileupTop])
-	for i := 0; i < loadingWidth; i++ {
-		if line[left+i] != '·' {
-			t.Fatalf("the loading mark at %d is %q, want a dot", i, line[left+i])
-		}
+	if frame := m.View(); !strings.ContainsRune(frame, spinner[m.spin]) {
+		t.Fatal("the frame on screen has no loading mark")
 	}
 	batch, ok := cmd().(tea.BatchMsg)
 	if !ok || len(batch) == 0 {
