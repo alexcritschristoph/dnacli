@@ -1557,7 +1557,7 @@ func TestOpenRefusesFilesThatDoNotMatch(t *testing.T) {
 		t.Fatalf("a missing file said %q", m.message)
 	}
 	run(m, "open notes.txt")
-	if m.message != "Error: wrong filetype. Please open a BAM, Genbank, or VCF." {
+	if m.message != "Error: wrong filetype. Please open a BAM, reference, BED/GTF/GFF3, or VCF." {
 		t.Fatalf("an unknown filetype said %q", m.message)
 	}
 
@@ -1571,19 +1571,21 @@ func TestOpenRefusesFilesThatDoNotMatch(t *testing.T) {
 }
 
 func TestCommandLineTakesSeveralAlignments(t *testing.T) {
-	in, err := readInputs([]string{"a.bam", "b.sam", "genes.gbk", "calls.vcf"})
+	in, err := readInputs([]string{"a.bam", "b.sam", "genes.gbk", "genes.gff3", "calls.vcf.gz"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(in.alignments) != 2 || in.alignments[0] != "a.bam" || in.alignments[1] != "b.sam" {
 		t.Fatalf("the alignments came out %v", in.alignments)
 	}
-	if in.reference != "genes.gbk" || in.variants != "calls.vcf" {
-		t.Fatalf("the reference and VCF came out %q and %q", in.reference, in.variants)
+	if in.reference != "genes.gbk" || in.features != "genes.gff3" || in.variants != "calls.vcf.gz" {
+		t.Fatalf("the reference, features, and VCF came out %q, %q, %q", in.reference, in.features, in.variants)
 	}
 	for _, args := range [][]string{
-		{"a.gbk", "b.fa"},  // two references
-		{"a.vcf", "b.vcf"}, // two VCFs
+		{"a.gbk", "b.fa"},            // two references
+		{"a.vcf", "b.vcf"},           // two VCFs
+		{"a.gbk", "a.gff3", "b.bed"}, // two annotation files
+		{"a.gff3"},                   // annotation without a reference
 		{"reads.bam", "notes.txt"},
 	} {
 		if _, err := readInputs(args); err == nil {
@@ -1859,11 +1861,12 @@ func TestUsageListsOnlyFileArguments(t *testing.T) {
 		"dnacli: a modern terminal read alignment viewer.",
 		"version " + version,
 		"  dnacli reads.bam [reference.gb|reference.fa]",
-		"  dnacli reads.bam [reference.gb|reference.fa] [variants.vcf]",
+		"  dnacli reads.bam [reference.gb|reference.fa] [variants.vcf|variants.vcf.gz]",
 		"  dnacli reads.bam [more.bam ...]",
 		"  dnacli sample_a.bam sample_b.bam genome.gbk snvs.vcf",
 		"  dnacli samples*.bam",
 		"Files are recognised by their extensions, and can be in any order.",
+		"BED, GTF, and GFF3 files are also supported for gene features.",
 	} {
 		if !strings.Contains(usage, line) {
 			t.Fatalf("the usage does not say %q", line)

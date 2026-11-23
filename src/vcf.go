@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -59,8 +61,18 @@ func LoadVariants(path string) ([]Variant, error) {
 		return nil, err
 	}
 	defer f.Close()
+	var source io.Reader = f
+	lower := strings.ToLower(path)
+	if strings.HasSuffix(lower, ".gz") || strings.HasSuffix(lower, ".bgz") {
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		source = gz
+	}
 	var out []Variant
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(source)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		line := sc.Text()

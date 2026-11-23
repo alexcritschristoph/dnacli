@@ -259,10 +259,11 @@ func TestAuditVariantLoading(t *testing.T) {
 			start := time.Now()
 			vs, err := LoadVariants("testdata/" + name)
 			t.Logf("%s: %d variants, err=%v, %v", name, len(vs), err, time.Since(start))
-			if strings.HasSuffix(name, ".gz") || strings.HasSuffix(name, ".bcf") {
-				if err == nil && len(vs) == 0 {
-					t.Logf("note: %s yields 0 variants when handed to LoadVariants directly; the CLI rejects the extension before this point", name)
-				}
+			if strings.HasSuffix(name, ".gz") && (err != nil || len(vs) == 0) {
+				t.Errorf("gzipped VCF loaded %d variants, err=%v", len(vs), err)
+			}
+			if strings.HasSuffix(name, ".bcf") {
+				t.Logf("note: BCF is not supported")
 			}
 		})
 	}
@@ -1079,10 +1080,15 @@ func TestAuditInputs(t *testing.T) {
 		{[]string{"a.fasta"}, true},
 		{[]string{"a.fna"}, true},
 		{[]string{"a.vcf"}, true},
+		{[]string{"a.vcf.gz"}, true},
+		{[]string{"a.vcf.bgz"}, true},
+		{[]string{"a.fa", "genes.gff3"}, true},
+		{[]string{"a.gb", "genes.gtf"}, true},
+		{[]string{"genes.gff3"}, false},
 		{[]string{"a.fa", "b.gb"}, false},
 		{[]string{"a.vcf", "b.vcf"}, false},
+		{[]string{"a.fa", "a.gff3", "b.bed"}, false},
 		{[]string{"a.cram"}, false},
-		{[]string{"a.vcf.gz"}, false},
 		{[]string{"a.bcf"}, false},
 		{[]string{"a.txt"}, false},
 	}
@@ -1095,8 +1101,8 @@ func TestAuditInputs(t *testing.T) {
 			t.Logf("%v -> %v", c.args, err)
 		}
 	}
-	in, _ := readInputs([]string{"x.gb", "a.bam", "b.bam", "v.vcf"})
-	t.Logf("mixed order parsed as alignments=%v ref=%q vcf=%q", in.alignments, in.reference, in.variants)
+	in, _ := readInputs([]string{"x.gb", "a.bam", "b.bam", "v.vcf.gz", "genes.gff3"})
+	t.Logf("mixed order parsed as alignments=%v ref=%q features=%q vcf=%q", in.alignments, in.reference, in.features, in.variants)
 }
 
 func TestAuditCoverageProfiles(t *testing.T) {

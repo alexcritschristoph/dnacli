@@ -312,7 +312,8 @@ func (r *Reference) MatchContigs(contigs []Contig) {
 		}
 		for name, seq := range r.Seq {
 			if len(seq) == c.Length {
-				r.Seq[c.Name], r.Features[c.Name], r.longest[c.Name] = seq, r.Features[name], r.longest[name]
+				r.Seq[c.Name] = seq
+				r.mergeFeatures(c.Name, r.Features[name], r.longest[name])
 				break
 			}
 		}

@@ -12,7 +12,7 @@ import (
 )
 
 // version is what ./build.sh stamps in, so a download can say which release it is.
-var version = "0.9.0"
+var version = "0.9.2"
 
 var usage = `dnacli: a modern terminal read alignment viewer.
 version ` + version + `
@@ -21,7 +21,7 @@ Usage:
   dnacli reads.bam [reference.gb|reference.fa]
 
 You can also load a reference genbank, fasta, and VCF:
-  dnacli reads.bam [reference.gb|reference.fa] [variants.vcf]
+  dnacli reads.bam [reference.gb|reference.fa] [variants.vcf|variants.vcf.gz]
 
 You can also specify multiple BAMs at once, if they share the same reference:
   dnacli reads.bam [more.bam ...]
@@ -31,11 +31,14 @@ Examples:
   dnacli samples*.bam
 
 Files are recognised by their extensions, and can be in any order.
+
+BED, GTF, and GFF3 files are also supported for gene features.
 `
 
 type inputs struct {
 	alignments []string
 	reference  string
+	features   string
 	variants   string
 }
 
@@ -51,7 +54,12 @@ func readInputs(args []string) (inputs, error) {
 				return in, fmt.Errorf("Error: only one reference file can be provided.")
 			}
 			in.reference = arg
-		case hasExt(arg, ".vcf"):
+		case hasExt(arg, ".bed", ".gtf", ".gff", ".gff3"):
+			if in.features != "" {
+				return in, fmt.Errorf("Error: only one BED, GTF, or GFF3 file can be provided.")
+			}
+			in.features = arg
+		case hasExt(arg, ".vcf", ".vcf.gz", ".vcf.bgz"):
 			if in.variants != "" {
 				return in, fmt.Errorf("Error: only one VCF can be provided.")
 			}
@@ -59,6 +67,9 @@ func readInputs(args []string) (inputs, error) {
 		default:
 			return in, fmt.Errorf("Error, filetype not recognized %s", arg)
 		}
+	}
+	if in.features != "" && in.reference == "" {
+		return in, fmt.Errorf("Error: %s needs a FASTA or GenBank reference.", in.features)
 	}
 	return in, nil
 }
@@ -120,6 +131,11 @@ func main() {
 	if refPath != "" {
 		if ref, err = LoadReference(refPath); err != nil {
 			quit("Cannot read %s: %v", refPath, err)
+		}
+		if in.features != "" {
+			if err := ref.AddFeatures(in.features); err != nil {
+				quit("Cannot read %s: %v", in.features, err)
+			}
 		}
 		ref.MatchContigs(src.Contigs)
 	}

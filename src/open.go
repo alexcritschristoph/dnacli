@@ -22,10 +22,12 @@ func (m *model) runOpen(arg string) {
 		m.openAlignments(path)
 	case hasExt(path, ".gb", ".gbk", ".genbank", ".fa", ".fasta", ".fna"):
 		m.openReference(path)
-	case hasExt(path, ".vcf"):
+	case hasExt(path, ".bed", ".gtf", ".gff", ".gff3"):
+		m.openFeatures(path)
+	case hasExt(path, ".vcf", ".vcf.gz", ".vcf.bgz"):
 		m.openVariants(path)
 	default:
-		m.notify("Error: wrong filetype. Please open a BAM, Genbank, or VCF.")
+		m.notify("Error: wrong filetype. Please open a BAM, reference, BED/GTF/GFF3, or VCF.")
 	}
 }
 
@@ -103,6 +105,21 @@ func (m *model) openReference(path string) {
 	m.measureImpacts()
 	m.reload()
 	m.notify("%s opened as the reference.", filepath.Base(path))
+}
+
+// openFeatures adds BED, GTF, or GFF3 gene annotations to the open reference.
+func (m *model) openFeatures(path string) {
+	if m.ref == nil {
+		m.notify("Open a FASTA or GenBank reference before %s.", filepath.Base(path))
+		return
+	}
+	if err := m.ref.AddFeatures(path); err != nil {
+		m.notify("Cannot read %s: %v", path, err)
+		return
+	}
+	m.measureImpacts()
+	m.reload()
+	m.notify("%s gene features opened.", filepath.Base(path))
 }
 
 func (m *model) openVariants(path string) {
