@@ -24,9 +24,7 @@ Instant install into `~/.local/bin`:
 curl -fsSL https://raw.githubusercontent.com/alexcritschristoph/dnacli/main/install.sh | sh
 ```
 
-Or download the folder for your computer from the
-[latest release](https://github.com/alexcritschristoph/dnacli/releases/latest),
-unpack it, and run the binary inside:
+Or download the folder for your computer from the latest release, unpack it, and run the binary inside:
 
 | System | Download |
 | --- | --- |
@@ -40,8 +38,25 @@ tar xzf ~/Downloads/dnacli-linux-amd64.tar.gz
 ~/Downloads/dnacli-linux-amd64/dnacli reads.bam reference.gb
 ```
 
-Note: A file fetched in a browser is quarantined by macOS the first time it runs, so open it once with a right click Open, or use the installer above.
+### Examples
 
+View a BAM:
+
+```
+dnacli mapping.bam
+```
+
+View many BAMs (with the same reference) at once:
+
+```
+dnacli ./genomes/*.bam
+```
+
+View a BAM with a GenBank and/or a VCF:
+
+```
+dnacli mapping.bam genome.gb variants.vcf
+```
 
 ### Features
 
@@ -94,8 +109,10 @@ If you're interested in contributing to dnacli, submit a pull request. I want to
 
 ### License
 
-Copyright (C) 2026 Alex Crits-Christoph.
-
 dnacli is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
 Foundation, version 3. It comes with no warranty. See [LICENSE](LICENSE).
+
+Created by Alex Crits-Christoph in the [Lieberman Lab](https://lieberman.science/).
+
+There is no citation for dnacli, but if you use it, please provide a link to this repository.
