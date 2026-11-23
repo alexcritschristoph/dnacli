@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,20 @@ import (
 	"strconv"
 	"strings"
 )
+
+// featureFile says whether path names a BED, GTF, or GFF3 file, optionally
+// gzipped.
+func featureFile(path string) bool {
+	lower := strings.ToLower(path)
+	for _, ext := range []string{".bed", ".gtf", ".gff", ".gff3"} {
+		if strings.HasSuffix(lower, ext) ||
+			strings.HasSuffix(lower, ext+".gz") ||
+			strings.HasSuffix(lower, ext+".bgz") {
+			return true
+		}
+	}
+	return false
+}
 
 // AddFeatures reads BED, GTF, or GFF3 gene annotations into a reference.
 func (r *Reference) AddFeatures(path string) error {
@@ -18,14 +33,24 @@ func (r *Reference) AddFeatures(path string) error {
 	}
 	defer f.Close()
 	lower := strings.ToLower(path)
+	var source io.Reader = f
+	if strings.HasSuffix(lower, ".gz") || strings.HasSuffix(lower, ".bgz") {
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			return err
+		}
+		defer gz.Close()
+		source = gz
+		lower = strings.TrimSuffix(strings.TrimSuffix(lower, ".gz"), ".bgz")
+	}
 	var feats map[string][]Feature
 	switch {
 	case strings.HasSuffix(lower, ".bed"):
-		feats, err = readBED(f)
+		feats, err = readBED(source)
 	case strings.HasSuffix(lower, ".gtf"):
-		feats, err = readGTF(f)
+		feats, err = readGTF(source)
 	case strings.HasSuffix(lower, ".gff"), strings.HasSuffix(lower, ".gff3"):
-		feats, err = readGFF3(f)
+		feats, err = readGFF3(source)
 	default:
 		return fmt.Errorf("not a BED, GTF, or GFF3 file")
 	}

@@ -22,7 +22,7 @@ func (m *model) runOpen(arg string) {
 		m.openAlignments(path)
 	case hasExt(path, ".gb", ".gbk", ".genbank", ".fa", ".fasta", ".fna"):
 		m.openReference(path)
-	case hasExt(path, ".bed", ".gtf", ".gff", ".gff3"):
+	case featureFile(path):
 		m.openFeatures(path)
 	case hasExt(path, ".vcf", ".vcf.gz", ".vcf.bgz"):
 		m.openVariants(path)

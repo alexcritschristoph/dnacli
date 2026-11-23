@@ -54,7 +54,7 @@ func readInputs(args []string) (inputs, error) {
 				return in, fmt.Errorf("Error: only one reference file can be provided.")
 			}
 			in.reference = arg
-		case hasExt(arg, ".bed", ".gtf", ".gff", ".gff3"):
+		case featureFile(arg):
 			if in.features != "" {
 				return in, fmt.Errorf("Error: only one BED, GTF, or GFF3 file can be provided.")
 			}

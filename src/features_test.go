@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,6 +100,35 @@ func TestGFF3FeaturesGroupCDSByTranscript(t *testing.T) {
 	}
 }
 
+func TestGzippedAnnotations(t *testing.T) {
+	for _, c := range []struct{ name, body string }{
+		{"genes.bed.gz", "chr1\t10\t20\tGeneA\t0\t+\n"},
+		{"genes.gtf.gz", "chr1\ttest\tgene\t1\t20\t.\t+\t.\tgene_id \"g1\"; gene_name \"GeneA\";\n"},
+		{"genes.gff3.gz", "##gff-version 3\nchr1\t.\tgene\t1\t20\t.\t+\t.\tID=g1;Name=GeneA\n"},
+	} {
+		path := filepath.Join(t.TempDir(), c.name)
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gz := gzip.NewWriter(f)
+		if _, err := gz.Write([]byte(c.body)); err != nil {
+			t.Fatal(err)
+		}
+		if err := gz.Close(); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+		ref := featureReference()
+		if err := ref.AddFeatures(path); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if gene := findFeature(ref, "chr1", "gene"); gene == nil || gene.Name != "GeneA" {
+			t.Fatalf("%s: gene is %+v", c.name, gene)
+		}
+	}
+}
+
 func TestFeaturesFollowARenamedReference(t *testing.T) {
 	fasta := writeFeatureFile(t, "ref.fa", ">chr1\n"+strings.Repeat("A", 100)+"\n")
 	ref, err := LoadReference(fasta)
@@ -152,11 +182,11 @@ func TestGzippedVCFMatchesPlain(t *testing.T) {
 }
 
 func TestCommandLineAcceptsFeaturesAndGzippedVCF(t *testing.T) {
-	in, err := readInputs([]string{"reads.bam", "genome.fa", "genes.gff3", "calls.vcf.gz"})
+	in, err := readInputs([]string{"reads.bam", "genome.fa", "genes.gff3.gz", "calls.vcf.gz"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.reference != "genome.fa" || in.features != "genes.gff3" || in.variants != "calls.vcf.gz" {
+	if in.reference != "genome.fa" || in.features != "genes.gff3.gz" || in.variants != "calls.vcf.gz" {
 		t.Fatalf("parsed %+v", in)
 	}
 	for _, args := range [][]string{
