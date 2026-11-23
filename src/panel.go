@@ -230,7 +230,7 @@ func (m *model) drawContigList(g grid, left, width, top, bottom int) {
 		}
 		g.draw(row, left, shorten(c.Name, width-14), style)
 		count := "? reads"
-		if m.src.countsKnown() {
+		if m.src.countsKnown(c.Name) {
 			count = fmt.Sprintf("%s reads", comma(int(c.Reads)))
 		}
 		g.draw(row, left+width-len(count), count, cellStyle{fg: colorMuted, bg: style.bg})

@@ -118,6 +118,70 @@ func TestStreamedModelWaitsForItsSketch(t *testing.T) {
 	}
 }
 
+func TestStreamedSketchPublishesOneContigAtATime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "supertest.bam")
+	data, err := os.ReadFile("testdata/supertest.bam")
+	if err != nil {
+		t.Skip(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src, err := openAlignments(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	want, err := OpenAlignments("testdata/supertest.bam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer want.Close()
+
+	m := newModel(src, nil, "", nil)
+	m.width, m.height = 150, 44
+	own, err := openAlignments(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own.reader.Omit(bam.AllVariableLengthData)
+	begin := time.Now()
+	msg := sketchStep(src, own, own.newSketch())
+	first := time.Since(begin)
+	_, next := m.Update(msg)
+	if next == nil {
+		t.Fatal("the whole stream was sketched in one message")
+	}
+	firstContig, secondContig := src.Contigs[0], src.Contigs[1]
+	if !src.countsKnown(firstContig.Name) || src.countsKnown(secondContig.Name) {
+		t.Fatalf("after one contig, known counts are %v, want only %s", src.known, firstContig.Name)
+	}
+	if !src.readyFor(firstContig.Name) || src.readyFor(secondContig.Name) {
+		t.Fatal("only the first contig should be ready for region reads")
+	}
+	if src.sketched || len(m.reads) == 0 {
+		t.Fatalf("after the first contig sketched=%v reads=%d", src.sketched, len(m.reads))
+	}
+
+	for next != nil {
+		got := next()
+		nextMsg, ok := got.(profileMsg)
+		if !ok {
+			t.Fatalf("the sketch returned %T", got)
+		}
+		_, next = m.Update(nextMsg)
+	}
+	if !src.sketched {
+		t.Fatal("the stream never marked itself sketched")
+	}
+	for i, c := range src.Contigs {
+		if c.Reads != want.Contigs[i].Reads {
+			t.Fatalf("%s has %d reads, want %d", c.Name, c.Reads, want.Contigs[i].Reads)
+		}
+	}
+	t.Logf("first contig in %s, whole sketch in %s", first.Round(time.Microsecond), time.Since(begin).Round(time.Millisecond))
+}
+
 func TestLargeUnindexedWarning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "large.bam")
 	f, err := os.Create(path)

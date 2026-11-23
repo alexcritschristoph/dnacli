@@ -98,12 +98,14 @@ type tabHit struct {
 }
 
 // profileMsg carries a file's finished coverage sketches, and the checkpoints
-// found along the way, back to the screen.
+// found along the way, back to the screen. For a streamed file it carries one
+// contig at a time and next reads the contig after it.
 type profileMsg struct {
 	source      *Source
 	profiles    map[string][]float64
 	checkpoints map[string][]checkpoint
 	counts      map[string]int64 // mapped reads per contig, for a streamed file
+	next        tea.Cmd          // reads the next contig, nil when the sketch is complete
 }
 
 // profileBins is the fewest coverage bins a contig gets. Longer contigs get
@@ -186,9 +188,9 @@ func sketchCoverage(src *Source) tea.Cmd {
 			own.reader.Omit(bam.AllVariableLengthData) // a sketch needs positions, not bases
 		}
 		if own.streaming {
-			profiles, checkpoints, counts := own.SketchAll()
-			return profileMsg{source: src, profiles: profiles, checkpoints: checkpoints, counts: counts}
+			return sketchStep(src, own, own.newSketch())
 		}
+		defer own.Close()
 		profiles := map[string][]float64{}
 		for _, c := range own.Contigs {
 			if c.Reads > 0 {
@@ -199,42 +201,79 @@ func sketchCoverage(src *Source) tea.Cmd {
 	}
 }
 
+// sketchStep turns one contig's finished sketch into a message and queues the
+// contig after it.
+func sketchStep(src, own *Source, cursor *sketchCursor) profileMsg {
+	r := cursor.next()
+	if r.done {
+		own.Close()
+	}
+	msg := profileMsg{source: src}
+	if r.contig != "" {
+		msg.profiles = map[string][]float64{r.contig: r.profile}
+		msg.checkpoints = map[string][]checkpoint{r.contig: r.points}
+		msg.counts = map[string]int64{r.contig: r.count}
+	}
+	if !r.done {
+		msg.next = func() tea.Msg { return sketchStep(src, own, cursor) }
+	}
+	return msg
+}
+
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.reload()
 	case profileMsg:
-		msg.source.sketched = true
+		if msg.next == nil {
+			msg.source.sketched = true
+		}
 		for _, s := range m.tabs {
 			if s != msg.source {
 				continue
 			}
-			for i, c := range s.Contigs {
-				if p := msg.profiles[c.Name]; p != nil {
+			for name, p := range msg.profiles {
+				if i := s.contigAt(name); i >= 0 && p != nil {
 					s.Contigs[i].Profile = p
 				}
 			}
-			if msg.checkpoints != nil {
-				s.checkpoints = msg.checkpoints
+			for name, points := range msg.checkpoints {
+				s.checkpoints[name] = points
 			}
-			if msg.counts != nil {
-				for i, c := range s.Contigs {
-					s.Contigs[i].Reads = msg.counts[c.Name]
+			if len(msg.counts) > 0 && s.known == nil {
+				s.known = map[string]bool{}
+			}
+			for name, n := range msg.counts {
+				if i := s.contigAt(name); i >= 0 {
+					s.Contigs[i].Reads = n
 				}
+				s.known[name] = true
 			}
 		}
 		if msg.source == m.src {
-			if msg.counts != nil && m.contigs()[m.contig].Reads == 0 {
+			name := m.contigs()[m.contig].Name
+			switched := false
+			if len(msg.counts) > 0 && !msg.source.counted && m.contigs()[m.contig].Reads == 0 {
 				for i, c := range m.contigs() {
 					if c.Reads > 0 {
 						m.contig, m.contigIndex = i, i
+						switched = true
 						break
 					}
 				}
 			}
-			m.reload()
+			_, hasCount := msg.counts[name]
+			_, hasPoint := msg.checkpoints[name]
+			touched := switched || msg.next == nil || hasCount || hasPoint || msg.profiles[name] != nil
+			if touched {
+				m.reload()
+			}
 		}
+		if len(msg.counts) > 0 {
+			msg.source.counted = true
+		}
+		return m, msg.next
 	case tea.MouseMsg:
 		if m.loading {
 			return m, nil // the frame on screen is frozen, so there is nothing new to point at

@@ -179,8 +179,10 @@ type Source struct {
 	// nearest checkpoint instead of decoding the file from the beginning.
 	streaming bool
 	size      int64
-	dataStart bgzf.Offset // just past the BAM header
-	sketched  bool        // its coverage sketch has arrived
+	dataStart bgzf.Offset     // just past the BAM header
+	sketched  bool            // its coverage sketch has arrived
+	known     map[string]bool // contigs whose read count a streamed sketch has published
+	counted   bool            // whether a streamed sketch has published any count
 }
 
 const (
@@ -301,10 +303,10 @@ func (s *Source) readyFor(contig string) bool {
 	return s.index != nil || s.memory != nil || len(s.checkpoints[contig]) > 0
 }
 
-// countsKnown says whether the read count of every contig has been measured.
-// An unindexed stream learns them from its first sketch.
-func (s *Source) countsKnown() bool {
-	return !s.streaming || s.sketched
+// countsKnown says whether one contig's read count has been measured. An
+// unindexed stream learns them one contig at a time.
+func (s *Source) countsKnown(contig string) bool {
+	return !s.streaming || s.sketched || s.known[contig]
 }
 
 // each walks every record overlapping a region, in coordinate order.
@@ -677,67 +679,121 @@ func (s *Source) CoverageProfile(contig string, bins int) []float64 {
 	return profile
 }
 
+// sketchResult is one finished contig from a streamed BAM.
+type sketchResult struct {
+	contig  string
+	profile []float64
+	points  []checkpoint
+	count   int64
+	done    bool // no contigs follow this one
+}
+
+// sketchCursor reads a streamed BAM one contig at a time. The file is
+// coordinate sorted, so a contig is finished when a record from another one
+// arrives.
+type sketchCursor struct {
+	source  *Source
+	current string
+	profile []float64
+	width   float64
+	maxEnd  int
+	seen    int
+	count   int64
+	points  []checkpoint
+}
+
+func (s *Source) newSketch() *sketchCursor {
+	return &sketchCursor{source: s}
+}
+
+// next reads until the contig now being read ends and returns it.
+func (c *sketchCursor) next() sketchResult {
+	for {
+		rec, err := c.source.reader.Read()
+		if err != nil {
+			return c.finish()
+		}
+		if rec.Ref == nil {
+			return c.finish() // coordinate sorted: only unplaced reads remain
+		}
+		if rec.Flags&sam.Unmapped != 0 {
+			continue
+		}
+		name := rec.Ref.Name()
+		if c.current == "" {
+			c.start(name)
+		} else if name != c.current {
+			finished := c.take()
+			c.start(name)
+			c.add(rec) // the first record of the next contig
+			return finished
+		}
+		c.add(rec)
+	}
+}
+
 // SketchAll reads a whole streamed BAM once and returns the coverage profile,
 // checkpoints and mapped-read count of every contig. It is the one-pass
 // counterpart to CoverageProfile for a file with no index.
 func (s *Source) SketchAll() (map[string][]float64, map[string][]checkpoint, map[string]int64) {
 	profiles := map[string][]float64{}
-	width := map[string]float64{}
-	for _, c := range s.Contigs {
-		if c.Length == 0 {
-			continue
-		}
-		bins := profileBinsFor(c.Length)
-		profiles[c.Name] = make([]float64, bins)
-		width[c.Name] = float64(c.Length) / float64(bins)
-	}
 	checkpoints := map[string][]checkpoint{}
 	counts := map[string]int64{}
-	type current struct {
-		name         string
-		profile      []float64
-		width        float64
-		maxEnd, seen int
-		count        int64
-		points       []checkpoint
-	}
-	var at *current
-	flush := func() {
-		if at != nil {
-			counts[at.name] = at.count
-			checkpoints[at.name] = at.points
-		}
-	}
+	cursor := s.newSketch()
 	for {
-		rec, err := s.reader.Read()
-		if err != nil {
+		r := cursor.next()
+		if r.contig != "" {
+			profiles[r.contig] = r.profile
+			checkpoints[r.contig] = r.points
+			counts[r.contig] = r.count
+		}
+		if r.done {
 			break
 		}
-		if rec.Ref == nil || rec.Flags&sam.Unmapped != 0 {
-			continue
-		}
-		name := rec.Ref.Name()
-		if at == nil || at.name != name {
-			flush()
-			at = &current{name: name, profile: profiles[name], width: width[name]}
-		}
-		if at.profile == nil {
-			continue
-		}
-		if at.seen%checkpointEvery == 0 {
-			offset := s.reader.LastChunk().Begin
-			if offsetBefore(offset, s.dataStart) {
-				offset = s.dataStart
-			}
-			at.points = append(at.points, checkpoint{End: at.maxEnd, Offset: offset})
-		}
-		at.seen++
-		at.count++
-		at.maxEnd = max(at.maxEnd, rec.End())
-		addProfile(at.profile, at.width, rec)
 	}
-	flush()
 	return profiles, checkpoints, counts
+}
+
+func (c *sketchCursor) start(name string) {
+	c.current = name
+	c.profile, c.width = nil, 0
+	if contig := c.source.contig(name); contig != nil && contig.Length > 0 {
+		bins := profileBinsFor(contig.Length)
+		c.profile = make([]float64, bins)
+		c.width = float64(contig.Length) / float64(bins)
+	}
+	c.maxEnd, c.seen, c.count, c.points = 0, 0, 0, nil
+}
+
+func (c *sketchCursor) add(rec *sam.Record) {
+	if c.profile == nil {
+		return
+	}
+	if c.seen%checkpointEvery == 0 {
+		offset := c.source.reader.LastChunk().Begin
+		if offsetBefore(offset, c.source.dataStart) {
+			offset = c.source.dataStart
+		}
+		c.points = append(c.points, checkpoint{End: c.maxEnd, Offset: offset})
+	}
+	c.seen++
+	c.count++
+	c.maxEnd = max(c.maxEnd, rec.End())
+	addProfile(c.profile, c.width, rec)
+}
+
+func (c *sketchCursor) take() sketchResult {
+	return sketchResult{contig: c.current, profile: c.profile, points: c.points, count: c.count}
+}
+
+func (c *sketchCursor) finish() sketchResult {
+	if c.current == "" {
+		return sketchResult{done: true}
+	}
+	out := c.take()
+	out.done = true
+	c.current = ""
+	return out
 }
 
 // memoryProfiles measures the coverage of records already held in memory, so
@@ -777,4 +833,12 @@ func (s *Source) contig(name string) *Contig {
 		}
 	}
 	return nil
+}
+
+// contigAt is a contig's place in Contigs, or -1. The header keeps that order.
+func (s *Source) contigAt(name string) int {
+	if ref := s.refs[name]; ref != nil {
+		return ref.ID()
+	}
+	return -1
 }

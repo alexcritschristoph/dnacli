@@ -338,14 +338,18 @@ func TestTheCoverageNoteTurnsWhileItWaits(t *testing.T) {
 }
 
 func TestTheContigListSaysWhenReadCountsAreUnknown(t *testing.T) {
-	m := ready(t, "dense_mito")
+	m := ready(t, "supertest")
 	m.panel, m.panelFocus = "contigs", true
 	m.src.streaming, m.src.sketched = true, false
+	m.src.known = map[string]bool{m.src.Contigs[0].Name: true}
 	begin := time.Now()
 	frame := plain(m.View())
 	drawn := time.Since(begin)
+	if !strings.Contains(frame, "257 reads") {
+		t.Fatalf("the published contig has no count: %q", frame)
+	}
 	if !strings.Contains(frame, "? reads") {
-		t.Fatal("a streamed file with unmeasured counts still shows a read count")
+		t.Fatal("a contig with no published count still shows a count")
 	}
 	m.src.sketched = true
 	m.reload()
