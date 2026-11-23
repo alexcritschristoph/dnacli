@@ -169,6 +169,9 @@ func (g grid) fill(row, from, to int, r rune, s cellStyle) {
 // spinner is the little mark that turns while a screen is being built.
 var spinner = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
+// loadingNote is what the pileup says while it waits for the coverage sketch.
+const loadingNote = "Loading read and coverage data...."
+
 func (m *model) View() string {
 	if m.width < 40 || m.height < 18 {
 		return "Error: dnacli needs a larger window."
@@ -179,12 +182,7 @@ func (m *model) View() string {
 		if len(m.frame[0]) != m.width {
 			return m.frame.String() // the window changed size mid-load
 		}
-		row := m.frame[0]
-		saved := row[m.width-1]
-		row[m.width-1] = cell{spinner[m.spin%len(spinner)], cellStyle{fg: colorText, bg: colorPanel}}
-		frame := m.frame.String()
-		row[m.width-1] = saved
-		return frame
+		return m.loadingMarks(m.frame)
 	}
 	m.refreshBars()
 	l := m.layout()
@@ -206,7 +204,36 @@ func (m *model) View() string {
 	if !m.exporting {
 		m.drawSuggestions(g)
 	}
-	return g.String()
+	return m.loadingMarks(g)
+}
+
+// loadingMarks draws the turning mark beside the rightmost tab while a screen
+// is built, and after the loading note while a coverage sketch is measured.
+func (m *model) loadingMarks(g grid) string {
+	type mark struct {
+		row, col int
+		was      cell
+	}
+	var marks []mark
+	set := func(row, col int, bg string) {
+		if row < 0 || row >= len(g) || col < 0 || col >= len(g[row]) {
+			return
+		}
+		marks = append(marks, mark{row, col, g[row][col]})
+		g[row][col] = cell{spinner[m.spin%len(spinner)], cellStyle{fg: colorText, bg: bg}}
+	}
+	if m.loading && len(m.tabHits) > 0 {
+		set(0, m.tabHits[len(m.tabHits)-1].to+2, colorPanel)
+	}
+	if m.waitingForCoverage() && !m.exporting {
+		l := m.layout()
+		set(l.pileupTop+1, gutterWidth+3+len(loadingNote), colorBackdrop)
+	}
+	text := g.String()
+	for _, at := range marks {
+		g[at.row][at.col] = at.was
+	}
+	return text
 }
 
 func (m *model) drawHeader(g grid, l layout) {
@@ -651,8 +678,8 @@ func (m *model) drawPileup(g grid, l layout) {
 		}
 		m.drawRead(g, row, l, a, contig)
 	}
-	if !m.showReads() && m.contigs()[m.contig].Profile == nil {
-		g.draw(l.pileupTop+1, gutterWidth+2, "Measuring coverage across the contig…", cellStyle{fg: colorMuted, bg: colorBackdrop})
+	if m.waitingForCoverage() {
+		g.draw(l.pileupTop+1, gutterWidth+2, loadingNote, cellStyle{fg: colorMuted, bg: colorBackdrop})
 	} else if !m.showReads() {
 		// The sketch is an illusion of the reads a closer zoom would draw: one
 		// row per read, as deep as the local coverage, with a break and an

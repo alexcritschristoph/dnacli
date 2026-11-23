@@ -229,7 +229,10 @@ func (m *model) drawContigList(g grid, left, width, top, bottom int) {
 			g.fill(row+1, left-1, m.width-1, ' ', style)
 		}
 		g.draw(row, left, shorten(c.Name, width-14), style)
-		count := fmt.Sprintf("%s reads", comma(int(c.Reads)))
+		count := "? reads"
+		if m.src.countsKnown() {
+			count = fmt.Sprintf("%s reads", comma(int(c.Reads)))
+		}
 		g.draw(row, left+width-len(count), count, cellStyle{fg: colorMuted, bg: style.bg})
 		g.draw(row+1, left, sparkline(c.Profile, width-10), cellStyle{fg: "#5b8fd6", bg: style.bg})
 		size := comma(c.Length) + " bp"

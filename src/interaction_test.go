@@ -201,9 +201,21 @@ func TestAPanDoesNotWaitForTheFile(t *testing.T) {
 	if !m.loading || m.view.start != start {
 		t.Fatalf("loading %v, start %d", m.loading, m.view.start)
 	}
-	if frame := m.View(); !strings.ContainsRune(frame, spinner[m.spin]) {
+	drawnAt := time.Now()
+	frame := plain(m.View())
+	drawn := time.Since(drawnAt)
+	if !strings.ContainsRune(frame, spinner[m.spin]) {
 		t.Fatal("the frame on screen has no loading mark")
 	}
+	line := []rune(strings.Split(frame, "\n")[0])
+	want := m.tabHits[len(m.tabHits)-1].to + 2
+	if want >= len(line) || line[want] != spinner[m.spin] {
+		t.Fatalf("the loading mark is not just past the rightmost tab at column %d", want)
+	}
+	if want == m.width-1 {
+		t.Fatal("the loading mark is still in the far corner")
+	}
+	t.Logf("drew the loading frame in %s", drawn.Round(time.Microsecond))
 	batch, ok := cmd().(tea.BatchMsg)
 	if !ok || len(batch) == 0 {
 		t.Fatalf("the load did not start: %T", cmd())
@@ -220,6 +232,59 @@ func TestAPanDoesNotWaitForTheFile(t *testing.T) {
 	if m.view.start != start+10*m.view.bpp {
 		t.Fatalf("the pan landed at %d, want %d", m.view.start, start+10*m.view.bpp)
 	}
+}
+
+func TestTheCoverageNoteTurnsWhileItWaits(t *testing.T) {
+	m := ready(t, "dense_mito")
+	for i := range m.src.Contigs {
+		m.src.Contigs[i].Profile = nil
+	}
+	m.src.sketched = false
+	m.view.bpp = m.fitZoom()
+	m.reload()
+	if !m.waitingForCoverage() {
+		t.Fatal("the dense contig is not waiting for its coverage sketch")
+	}
+	begin := time.Now()
+	lines := strings.Split(plain(m.View()), "\n")
+	drawn := time.Since(begin)
+	row := []rune(lines[m.layout().pileupTop+1])
+	at := -1
+	for i := 0; i+len(loadingNote) <= len(row); i++ {
+		if string(row[i:i+len(loadingNote)]) == loadingNote {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		t.Fatalf("the pileup does not say %q: %q", loadingNote, string(row))
+	}
+	mark := at + len(loadingNote) + 1
+	if mark >= len(row) || row[mark] != spinner[m.spin] {
+		t.Fatalf("no turning mark after %q: %q", loadingNote, string(row))
+	}
+	if _, cmd := m.Update(spinMsg{}); m.spin == 0 || cmd == nil {
+		t.Fatal("the waiting note's mark stopped turning")
+	}
+	t.Logf("drew the waiting note and its turning mark in %s", drawn.Round(time.Microsecond))
+}
+
+func TestTheContigListSaysWhenReadCountsAreUnknown(t *testing.T) {
+	m := ready(t, "dense_mito")
+	m.panel, m.panelFocus = "contigs", true
+	m.src.streaming, m.src.sketched = true, false
+	begin := time.Now()
+	frame := plain(m.View())
+	drawn := time.Since(begin)
+	if !strings.Contains(frame, "? reads") {
+		t.Fatal("a streamed file with unmeasured counts still shows a read count")
+	}
+	m.src.sketched = true
+	m.reload()
+	if strings.Contains(plain(m.View()), "? reads") {
+		t.Fatal("the measured read count is still a question mark")
+	}
+	t.Logf("drew the contig list in %s", drawn.Round(time.Microsecond))
 }
 
 func TestZoomingIsNotDroppedWhileScreensLoad(t *testing.T) {

@@ -163,7 +163,7 @@ func (m *model) Init() tea.Cmd {
 		work = append(work, sketchCoverage(src))
 	}
 	work = append(work, m.fade()) // a message set before the screen opened still fades
-	return tea.Sequence(work...)
+	return tea.Batch(tea.Sequence(work...), m.spinTick())
 }
 
 // sketchCoverage measures the coverage of every contig in a file. It opens the
@@ -178,7 +178,7 @@ func sketchCoverage(src *Source) tea.Cmd {
 		}
 		own, err := OpenAlignments(src.Path)
 		if err != nil {
-			return nil
+			return profileMsg{source: src} // nothing more will come, so stop waiting
 		}
 		defer own.Close()
 		if own.reader != nil {
@@ -204,6 +204,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.reload()
 	case profileMsg:
+		msg.source.sketched = true
 		for _, s := range m.tabs {
 			if s != msg.source {
 				continue
@@ -270,7 +271,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case spinMsg:
-		if m.loading {
+		if m.loading || m.sketching() {
 			m.spin++
 			return m, m.spinTick()
 		}
@@ -1259,6 +1260,23 @@ func (m *model) showReads() bool {
 	}
 	c := m.contigs()[m.contig]
 	return c.Length > 0 && int64(c.Reads)*int64(m.span())/int64(c.Length) <= readSketchLimit
+}
+
+// waitingForCoverage is true while the contig on display has neither reads to
+// draw nor the coverage sketch that stands in for them.
+func (m *model) waitingForCoverage() bool {
+	c := m.contigs()[m.contig]
+	return !m.showReads() && c.Profile == nil && !m.src.sketched
+}
+
+// sketching is true while any open file is still measuring its coverage.
+func (m *model) sketching() bool {
+	for _, s := range m.tabs {
+		if !s.sketched {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *model) measureReads() {

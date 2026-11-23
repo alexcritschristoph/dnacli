@@ -180,6 +180,7 @@ type Source struct {
 	streaming bool
 	size      int64
 	dataStart bgzf.Offset // just past the BAM header
+	sketched  bool        // its coverage sketch has arrived
 }
 
 const (
@@ -298,6 +299,12 @@ func (s *Source) Close() {
 // An indexed or in-memory file can; a streamed one waits for its sketch.
 func (s *Source) readyFor(contig string) bool {
 	return s.index != nil || s.memory != nil || len(s.checkpoints[contig]) > 0
+}
+
+// countsKnown says whether the read count of every contig has been measured.
+// An unindexed stream learns them from its first sketch.
+func (s *Source) countsKnown() bool {
+	return !s.streaming || s.sketched
 }
 
 // each walks every record overlapping a region, in coordinate order.

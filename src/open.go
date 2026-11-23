@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // runOpen opens another file: an alignment file joins the tabs along the top,
@@ -62,7 +64,7 @@ func (m *model) openAlignments(path string) {
 	}
 	m.tabs = append(m.tabs, src)
 	m.switchTab(len(m.tabs) - 1)
-	m.pending = sketchCoverage(src)
+	m.pending = tea.Batch(sketchCoverage(src), m.spinTick())
 }
 
 // sameContigs is true when every contig of a file is one the first tab has,
